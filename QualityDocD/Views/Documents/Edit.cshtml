@@ -1,0 +1,41 @@
+﻿@model QualityDocD.Models.ViewModels.DocumentFormViewModel
+@{ ViewData["Title"] = "Editar Documento"; }
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-warning text-dark d-flex align-items-center gap-2">
+                <i class="bi bi-pencil-square fs-5"></i>
+                <h5 class="mb-0">Editar Documento</h5>
+                <span class="badge bg-dark ms-auto small">Al guardar vuelve a Borrador</span>
+            </div>
+            <div class="card-body p-4">
+                @if (!string.IsNullOrEmpty(Model.ExistingFileName))
+                {
+                    <div class="alert alert-info d-flex align-items-center gap-2 py-2 mb-3 small">
+                        <i class="bi bi-paperclip"></i>
+                        Archivo actual: <strong>@Model.ExistingFileName</strong>
+                        (@Model.ExistingFileExt &nbsp;·&nbsp;
+                         @((Model.ExistingFileSize / 1024.0).ToString("N1")) KB)
+                        — Subir un nuevo archivo lo reemplazará.
+                    </div>
+                }
+                <form asp-action="Edit" asp-route-id="@Model.Id"
+                      method="post" enctype="multipart/form-data">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" asp-for="Id" />
+                    @{ await Html.RenderPartialAsync("_DocumentForm", Model); }
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="submit" class="btn btn-warning text-dark fw-semibold">
+                            <i class="bi bi-floppy me-1"></i>Guardar Cambios
+                        </button>
+                        <a asp-action="Details" asp-route-id="@Model.Id"
+                           class="btn btn-outline-secondary">Cancelar</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts { @{ await Html.RenderPartialAsync("_ValidationScripts"); } }

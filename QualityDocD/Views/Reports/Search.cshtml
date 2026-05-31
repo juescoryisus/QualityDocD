@@ -1,0 +1,113 @@
+﻿@model QualityDocD.Models.ViewModels.SearchResultViewModel
+@{
+    ViewData["Title"] = "Búsqueda Avanzada";
+}
+
+<h4 class="fw-bold mb-4">
+    <i class="bi bi-search me-2 text-primary"></i>Búsqueda Avanzada
+    <small class="text-muted small fw-normal ms-2">(motor: MongoDB full-text)</small>
+</h4>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body py-3">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-5">
+                <label class="form-label small fw-semibold mb-1">Búsqueda de texto</label>
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" name="q" value="@Model.Query" class="form-control"
+                           placeholder="Título, descripción, etiquetas, norma..." />
+                </div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold mb-1">Categoría</label>
+                <select name="category" class="form-select form-select-sm">
+                    <option value="">— Todas —</option>
+                    @foreach (var c in new[] { "Manual", "Procedure", "Record", "Audit" })
+                    {
+                        <option value="@c">@c</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold mb-1">Estado</label>
+                <select name="status" class="form-select form-select-sm">
+                    <option value="">— Todos —</option>
+                    <option value="Approved">Aprobado</option>
+                    <option value="Draft">Borrador</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-search me-1"></i>Buscar
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.Query) || Model.Total > 0)
+{
+    <div class="mb-3 text-muted small">
+        <i class="bi bi-info-circle me-1"></i>
+        @Model.Total resultado(s) para <strong>"@Model.Query"</strong>
+    </div>
+
+    <div class="row g-3">
+        @foreach (var r in Model.Results)
+        {
+            <div class="col-md-6 col-lg-4">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <span class="badge bg-light text-dark border font-monospace small">
+                                @r.Code
+                            </span>
+                            @Html.Partial("_StatusBadge", r.Status)
+                        </div>
+                        <h6 class="fw-semibold mb-1">
+                            <a asp-controller="Documents" asp-action="Details"
+                               asp-route-id="@r.DocumentId"
+                               class="text-decoration-none text-dark">@r.Title</a>
+                        </h6>
+                        <div class="text-muted small mb-2">
+                            @r.Category
+                            @if (!string.IsNullOrEmpty(r.Standard))
+                            {
+                                <span>· @r.Standard</span>
+                            }
+                        </div>
+                        <div class="d-flex flex-wrap gap-1">
+                            @foreach (var tag in r.Tags.Take(5))
+                            {
+                                <span class="badge bg-light text-secondary border"
+                                      style="font-size:.7rem">@tag</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="card-footer bg-white border-top-0 pt-0">
+                        <a asp-controller="Documents" asp-action="Details"
+                           asp-route-id="@r.DocumentId"
+                           class="btn btn-sm btn-outline-primary w-100">
+                            <i class="bi bi-eye me-1"></i>Ver Documento
+                        </a>
+                    </div>
+                </div>
+            </div>
+        }
+        @if (!Model.Results.Any() && !string.IsNullOrEmpty(Model.Query))
+        {
+            <div class="col-12 text-center text-muted py-4">
+                <i class="bi bi-search fs-2 d-block mb-2"></i>
+                No se encontraron documentos en MongoDB para "@Model.Query"
+            </div>
+        }
+    </div>
+}
+else
+{
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-search fs-1 d-block mb-3 opacity-25"></i>
+        <p>Ingresa términos de búsqueda para consultar el índice MongoDB.</p>
+    </div>
+}

@@ -1,0 +1,77 @@
+﻿@model QualityDocD.Models.ViewModels.DocumentFormViewModel
+
+<div asp-validation-summary="ModelOnly" class="alert alert-danger small"></div>
+
+<div class="row g-3">
+    <div class="col-12">
+        <label asp-for="Title" class="form-label fw-semibold small"></label>
+        <input asp-for="Title" class="form-control" placeholder="Nombre del documento" />
+        <span asp-validation-for="Title" class="text-danger small"></span>
+    </div>
+
+    <div class="col-12">
+        <label asp-for="Description" class="form-label fw-semibold small"></label>
+        <textarea asp-for="Description" class="form-control" rows="3"
+                  placeholder="Descripción o alcance del documento..."></textarea>
+    </div>
+
+    <div class="col-md-6">
+        <label asp-for="Category" class="form-label fw-semibold small"></label>
+        <select asp-for="Category" class="form-select">
+            <option value="">— Seleccionar —</option>
+            <option value="Manual">Manual</option>
+            <option value="Procedure">Procedimiento</option>
+            <option value="Record">Registro</option>
+            <option value="Audit">Auditoría</option>
+            <option value="Other">Otro</option>
+        </select>
+        <span asp-validation-for="Category" class="text-danger small"></span>
+    </div>
+
+    <div class="col-md-6">
+        <label asp-for="Standard" class="form-label fw-semibold small"></label>
+        <select asp-for="Standard" class="form-select">
+            <option value="">— Ninguno —</option>
+            <option value="ISO 9001">ISO 9001 — Calidad</option>
+            <option value="ISO 14001">ISO 14001 — Medio Ambiente</option>
+            <option value="ISO 45001">ISO 45001 — SST</option>
+            <option value="ISO 27001">ISO 27001 — Seguridad Info</option>
+            <option value="ISO/IEC 17025">ISO/IEC 17025 — Laboratorios</option>
+            <option value="ANSI">ANSI</option>
+            <option value="Interno">Interno</option>
+        </select>
+    </div>
+
+    <div class="col-md-8">
+        <label asp-for="Tags" class="form-label fw-semibold small"></label>
+        <input asp-for="Tags" class="form-control"
+               placeholder="calidad, procedimiento, aprobación (separadas por coma)" />
+        <div class="form-text">Se sincronizan con MongoDB para búsqueda avanzada.</div>
+    </div>
+
+    <div class="col-md-4">
+        <label asp-for="ExpiresAt" class="form-label fw-semibold small"></label>
+        <input asp-for="ExpiresAt" class="form-control" type="date" />
+    </div>
+
+    <div class="col-12">
+        <label asp-for="File" class="form-label fw-semibold small"></label>
+        <input asp-for="File" class="form-control" type="file"
+               accept=".pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt,
+                       .png,.jpg,.jpeg,.gif,.tif,.tiff,
+                       .dwg,.dxf,.step,.txt,.csv,.zip" />
+        <div class="form-text">
+            PDF, Word, Excel, PowerPoint, imágenes, CAD (DWG/DXF/STEP), CSV, ZIP.
+        </div>
+        <span asp-validation-for="File" class="text-danger small"></span>
+    </div>
+
+    <div class="col-12">
+        <div class="form-check">
+            <input asp-for="IsPublic" class="form-check-input" type="checkbox" />
+            <label asp-for="IsPublic" class="form-check-label">
+                Visible en el portal público (operarios)
+            </label>
+        </div>
+    </div>
+</div>

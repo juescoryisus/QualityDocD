@@ -1,0 +1,20 @@
+﻿@model string
+@{
+    var (bg, icon) = Model switch
+    {
+        "Draft"       => ("secondary", "bi-pencil-square"),
+        "UnderReview" => ("warning",   "bi-hourglass-split"),
+        "Approved"    => ("success",   "bi-check-circle-fill"),
+        "Obsolete"    => ("danger",    "bi-archive-fill"),
+        _             => ("light",     "bi-question"),
+    };
+    var label = Model switch
+    {
+        "Draft"       => "Borrador",
+        "UnderReview" => "En Revisión",
+        "Approved"    => "Aprobado",
+        "Obsolete"    => "Obsoleto",
+        _             => Model,
+    };
+}
+<span class="badge bg-@bg"><i class="bi @icon me-1"></i>@label</span>

@@ -1,0 +1,27 @@
+﻿@model QualityDocD.Models.ViewModels.DocumentFormViewModel
+@{ ViewData["Title"] = "Nuevo Documento"; }
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-primary text-white d-flex align-items-center gap-2">
+                <i class="bi bi-file-earmark-plus fs-5"></i>
+                <h5 class="mb-0">Crear Nuevo Documento</h5>
+            </div>
+            <div class="card-body p-4">
+                <form asp-action="Create" method="post" enctype="multipart/form-data">
+                    @Html.AntiForgeryToken()
+                    @{ await Html.RenderPartialAsync("_DocumentForm", Model); }
+                    <div class="d-flex gap-2 mt-4">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-floppy me-1"></i>Crear Documento
+                        </button>
+                        <a asp-action="Index" class="btn btn-outline-secondary">Cancelar</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts { @{ await Html.RenderPartialAsync("_ValidationScripts"); } }

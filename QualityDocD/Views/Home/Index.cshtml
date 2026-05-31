@@ -1,0 +1,102 @@
+﻿@model QualityDocD.Models.ViewModels.DocumentIndexViewModel
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="fw-bold mb-0"><i class="bi bi-speedometer2 me-2 text-primary"></i>Dashboard</h4>
+        <p class="text-muted small mb-0">Resumen del sistema de gestión documental</p>
+    </div>
+    <a asp-controller="Documents" asp-action="Create" class="btn btn-primary">
+        <i class="bi bi-plus-lg me-1"></i>Nuevo Documento
+    </a>
+</div>
+
+<!-- Tarjetas de estadísticas -->
+<div class="row g-3 mb-4">
+    @{
+        var stats = new[]
+        {
+            ("Aprobados",   "Approved",    "bi-check-circle-fill", "success"),
+            ("En Revisión", "UnderReview", "bi-hourglass-split",   "warning"),
+            ("Borradores",  "Draft",       "bi-pencil-square",     "secondary"),
+            ("Obsoletos",   "Obsolete",    "bi-archive-fill",      "danger"),
+        };
+    }
+    @foreach (var (label, key, icon, color) in stats)
+    {
+        var count = Model.StatusCounts.GetValueOrDefault(key, 0);
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body d-flex align-items-center gap-3">
+                    <div class="rounded-3 p-3 bg-@color bg-opacity-10">
+                        <i class="bi @icon fs-4 text-@color"></i>
+                    </div>
+                    <div>
+                        <div class="fw-bold fs-4">@count</div>
+                        <div class="text-muted small">@label</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Documentos recientes -->
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center">
+        <span class="fw-semibold">
+            <i class="bi bi-clock-history me-2 text-primary"></i>Documentos Recientes
+        </span>
+        <a asp-controller="Documents" asp-action="Index" class="btn btn-sm btn-outline-primary">
+            Ver todos <i class="bi bi-arrow-right ms-1"></i>
+        </a>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Código</th>
+                        <th>Título</th>
+                        <th>Categoría</th>
+                        <th>Estado</th>
+                        <th>Creado por</th>
+                        <th>Fecha</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var doc in Model.Documents.Take(8))
+                    {
+                        <tr>
+                            <td><span class="badge bg-light text-dark border">@doc.Code</span></td>
+                            <td class="fw-semibold">@doc.Title</td>
+                            <td><span class="text-muted small">@doc.Category</span></td>
+                            <td>@Html.Partial("_StatusBadge", doc.Status)</td>
+                            <td class="text-muted small">@doc.CreatedBy</td>
+                            <td class="text-muted small">@doc.CreatedAt.ToString("dd/MM/yyyy")</td>
+                            <td>
+                                <a asp-controller="Documents" asp-action="Details"
+                                   asp-route-id="@doc.Id" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                    @if (!Model.Documents.Any())
+                    {
+                        <tr>
+                            <td colspan="7" class="text-center text-muted py-4">
+                                No hay documentos aún.
+                                <a asp-controller="Documents" asp-action="Create">Crear el primero</a>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+

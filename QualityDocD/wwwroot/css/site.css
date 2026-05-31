@@ -1,0 +1,51 @@
+/* QualityDoc — Estilos personalizados */
+
+body {
+    background-color: #f8fafc;
+    font-size: .92rem;
+}
+
+.card {
+    border-radius: 10px;
+}
+
+.table th {
+    font-size: .78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: #64748b;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+.badge {
+    font-weight: 600;
+}
+
+.progress {
+    border-radius: 99px;
+    background: #e2e8f0;
+}
+
+footer {
+    font-size: .78rem;
+}
+
+.form-label.fw-semibold {
+    color: #374151;
+}
+
+.alert {
+    border-radius: 8px;
+    border: none;
+}
+
+@media (max-width: 576px) {
+    .container-fluid {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+}

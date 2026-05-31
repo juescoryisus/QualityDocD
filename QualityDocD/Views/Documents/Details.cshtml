@@ -1,0 +1,274 @@
+﻿@model QualityDocD.Models.ViewModels.DocumentDetailViewModel
+@{ ViewData["Title"] = Model.Code + " — " + Model.Title; }
+
+<!-- Cabecera -->
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-start mb-4">
+    <div>
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <span class="badge bg-light text-dark border font-monospace fs-6">@Model.Code</span>
+            @Html.Partial("_StatusBadge", Model.Status)
+            @if (Model.IsPublic)
+            {
+                <span class="badge bg-info text-dark">
+                    <i class="bi bi-globe2 me-1"></i>Público
+                </span>
+            }
+        </div>
+        <h4 class="fw-bold mb-0">@Model.Title</h4>
+        <p class="text-muted small mb-0">
+            v@(Model.Version) &nbsp;·&nbsp; @Model.Category &nbsp;·&nbsp; @Model.Standard
+            &nbsp;·&nbsp; Creado por <strong>@Model.CreatedBy</strong>
+            el @Model.CreatedAt.ToString("dd/MM/yyyy HH:mm")
+        </p>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a asp-action="Index" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left me-1"></i>Volver
+        </a>
+        <a asp-action="Edit" asp-route-id="@Model.Id" class="btn btn-warning btn-sm text-dark">
+            <i class="bi bi-pencil me-1"></i>Editar
+        </a>
+        @if (!string.IsNullOrEmpty(Model.FileExtension))
+        {
+            <a asp-action="Download" asp-route-id="@Model.Id" class="btn btn-success btn-sm">
+                <i class="bi bi-download me-1"></i>Descargar
+            </a>
+        }
+        @if (User.IsInRole("Admin") || User.IsInRole("Manager"))
+        {
+            <form asp-action="MarkObsolete" asp-route-id="@Model.Id" method="post"
+                  class="d-inline"
+                  onsubmit="return confirm('¿Marcar este documento como Obsoleto?')">
+                @Html.AntiForgeryToken()
+                <button class="btn btn-danger btn-sm">
+                    <i class="bi bi-archive me-1"></i>Obsoleto
+                </button>
+            </form>
+        }
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Columna izquierda -->
+    <div class="col-lg-8">
+        <!-- Información -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom fw-semibold">
+                <i class="bi bi-info-circle me-2 text-primary"></i>Información
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-sm-3 text-muted small">Descripción</dt>
+                    <dd class="col-sm-9">
+                        @(string.IsNullOrEmpty(Model.Description) ? "—" : Model.Description)
+                    </dd>
+
+                    <dt class="col-sm-3 text-muted small">Categoría</dt>
+                    <dd class="col-sm-9">@Model.Category</dd>
+
+                    <dt class="col-sm-3 text-muted small">Norma</dt>
+                    <dd class="col-sm-9">
+                        @(string.IsNullOrEmpty(Model.Standard) ? "—" : Model.Standard)
+                    </dd>
+
+                    <dt class="col-sm-3 text-muted small">Etiquetas</dt>
+                    <dd class="col-sm-9">
+                        @if (!string.IsNullOrEmpty(Model.Tags))
+                        {
+                            @foreach (var tag in Model.Tags.Split(','))
+                            {
+                                <span class="badge bg-light text-secondary border me-1">
+                                    @tag.Trim()
+                                </span>
+                            }
+                        }
+                        else { <span class="text-muted">—</span> }
+                    </dd>
+
+                    @if (!string.IsNullOrEmpty(Model.OriginalFileName))
+                    {
+                        <dt class="col-sm-3 text-muted small">Archivo</dt>
+                        <dd class="col-sm-9">
+                            <i class="bi bi-paperclip me-1"></i>
+                            <strong>@Model.OriginalFileName</strong>
+                            <span class="text-muted small ms-2">
+                                (@Model.FileExtension &nbsp;·&nbsp;
+                                 @((Model.FileSizeBytes / 1024.0).ToString("N1")) KB)
+                            </span>
+                        </dd>
+                    }
+
+                    @if (Model.ExpiresAt.HasValue)
+                    {
+                        var expired = Model.ExpiresAt.Value < DateTime.UtcNow;
+                        <dt class="col-sm-3 text-muted small">Vence</dt>
+                        <dd class="col-sm-9 @(expired ? "text-danger fw-bold" : "")">
+                            @Model.ExpiresAt.Value.ToString("dd/MM/yyyy")
+                            @(expired ? " — VENCIDO" : "")
+                        </dd>
+                    }
+
+                    @if (Model.ApprovedAt.HasValue)
+                    {
+                        <dt class="col-sm-3 text-muted small">Aprobado</dt>
+                        <dd class="col-sm-9 text-success">
+                            @Model.ApprovedAt.Value.ToString("dd/MM/yyyy HH:mm")
+                        </dd>
+                    }
+                </dl>
+            </div>
+        </div>
+
+        <!-- Enviar a revisión -->
+        @if (Model.Status == "Draft")
+        {
+            <div class="card border-0 shadow-sm border-start border-4 border-warning mb-4">
+                <div class="card-header bg-white border-bottom fw-semibold">
+                    <i class="bi bi-send me-2 text-warning"></i>Enviar a Revisión
+                </div>
+                <div class="card-body">
+                    <form asp-action="SubmitForReview" method="post">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="DocumentId" value="@Model.Id" />
+                        <label class="form-label small fw-semibold">Seleccionar Revisores</label>
+                        @if (Model.AvailableReviewers.Any())
+                        {
+                            <div class="row g-2 mb-3">
+                                @foreach (var r in Model.AvailableReviewers)
+                                {
+                                    <div class="col-md-6">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox"
+                                                   name="ReviewerIds" value="@r.Id"
+                                                   id="rev_@r.Id" />
+                                            <label class="form-check-label small" for="rev_@r.Id">
+                                                <strong>@r.Username</strong>
+                                                <span class="text-muted">(@r.Department)</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="text-muted small">No hay revisores disponibles.</p>
+                        }
+                        <button type="submit" class="btn btn-warning text-dark btn-sm"
+                                onclick="return document.querySelectorAll(
+                                    'input[name=ReviewerIds]:checked').length > 0
+                                    || alert('Seleccione al menos un revisor.')">
+                            <i class="bi bi-send me-1"></i>Enviar a Revisión
+                        </button>
+                    </form>
+                </div>
+            </div>
+        }
+
+        <!-- Mi aprobación pendiente -->
+        @{
+            var myApproval = Model.Approvals.FirstOrDefault(a =>
+                a.ReviewerName == User.Identity!.Name && a.Status == "Pending");
+        }
+        @if (myApproval != null && Model.Status == "UnderReview")
+        {
+            <div class="card border-0 shadow-sm border-start border-4 border-primary mb-4">
+                <div class="card-header bg-white border-bottom fw-semibold">
+                    <i class="bi bi-person-check me-2 text-primary"></i>Tu Aprobación Pendiente
+                </div>
+                <div class="card-body">
+                    <form asp-action="ProcessApproval" method="post">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="DocumentId" value="@Model.Id" />
+                        <input type="hidden" name="ApprovalId" value="@myApproval.Id" />
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">
+                                Comentarios (opcional)
+                            </label>
+                            <textarea name="Comments" class="form-control" rows="2"
+                                      placeholder="Observaciones o razón del rechazo..."></textarea>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="submit" name="Action" value="approve"
+                                    class="btn btn-success btn-sm">
+                                <i class="bi bi-check-lg me-1"></i>Aprobar
+                            </button>
+                            <button type="submit" name="Action" value="reject"
+                                    class="btn btn-danger btn-sm"
+                                    onclick="return confirm('¿Rechazar este documento?')">
+                                <i class="bi bi-x-lg me-1"></i>Rechazar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Columna derecha -->
+    <div class="col-lg-4">
+        <!-- Revisores -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom fw-semibold small">
+                <i class="bi bi-person-check me-2 text-primary"></i>
+                Revisores (@Model.Approvals.Count)
+            </div>
+            <ul class="list-group list-group-flush">
+                @if (!Model.Approvals.Any())
+                {
+                    <li class="list-group-item text-muted small text-center py-3">
+                        Sin revisores asignados
+                    </li>
+                }
+                @foreach (var a in Model.Approvals)
+                {
+                    <li class="list-group-item d-flex align-items-center gap-2 py-2">
+                        <span class="badge rounded-pill bg-light text-dark border">@a.Order</span>
+                        <div class="flex-grow-1">
+                            <div class="small fw-semibold">@a.ReviewerName</div>
+                            @if (!string.IsNullOrEmpty(a.Comments))
+                            {
+                                <div class="text-muted" style="font-size:.75rem">@a.Comments</div>
+                            }
+                        </div>
+                        @Html.Partial("_StatusBadge", a.Status)
+                    </li>
+                }
+            </ul>
+        </div>
+
+        <!-- Historial -->
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom fw-semibold small">
+                <i class="bi bi-clock-history me-2 text-secondary"></i>Historial
+            </div>
+            <ul class="list-group list-group-flush"
+                style="max-height:320px;overflow-y:auto">
+                @foreach (var log in Model.AuditLogs)
+                {
+                    <li class="list-group-item py-2">
+                        <div class="d-flex justify-content-between">
+                            <span class="small fw-semibold">@log.Action</span>
+                            <span class="text-muted" style="font-size:.72rem">
+                                @log.CreatedAt.ToString("dd/MM HH:mm")
+                            </span>
+                        </div>
+                        <div class="text-muted" style="font-size:.75rem">
+                            @(log.Username ?? "Sistema")
+                            @if (log.OldValue != null || log.NewValue != null)
+                            {
+                                <span>· @log.OldValue → @log.NewValue</span>
+                            }
+                        </div>
+                    </li>
+                }
+                @if (!Model.AuditLogs.Any())
+                {
+                    <li class="list-group-item text-muted small text-center py-3">
+                        Sin historial
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+</div>

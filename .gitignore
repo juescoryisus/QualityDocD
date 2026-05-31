@@ -1,0 +1,19 @@
+.env
+
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+*.log
+
+# Docker
+.dockerignore
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Archivos subidos por los usuarios
+QualityDocD/wwwroot/uploads/

@@ -1,12 +1,22 @@
 ﻿@model QualityDocD.Models.ViewModels.DocumentDetailViewModel
-@{ ViewData["Title"] = Model.Code + " — " + Model.Title; }
+@using System.Security.Claims
+@{
+    ViewData["Title"] = Model.Code + " — " + Model.Title;
+
+    // Variables para el panel de aprobaciones
+    var userId = int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "0");
+    var isInReview = Model.Status is "UnderReview" or "UnderSecondReview";
+    var myPending = Model.Approvals.FirstOrDefault(a =>
+                         a.ReviewerId == userId && a.Status == "Pending");
+    var canReview = myPending != null;
+}
 
 <!-- Cabecera -->
 <div class="d-flex flex-wrap gap-2 justify-content-between align-items-start mb-4">
     <div>
         <div class="d-flex align-items-center gap-2 mb-1">
             <span class="badge bg-light text-dark border font-monospace fs-6">@Model.Code</span>
-            @Html.Partial("_StatusBadge", Model.Status)
+            <partial name="_StatusBadge" model="Model.Status" />
             @if (Model.IsPublic)
             {
                 <span class="badge bg-info text-dark">
@@ -51,6 +61,7 @@
 <div class="row g-4">
     <!-- Columna izquierda -->
     <div class="col-lg-8">
+
         <!-- Información -->
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header bg-white border-bottom fw-semibold">
@@ -82,7 +93,10 @@
                                 </span>
                             }
                         }
-                        else { <span class="text-muted">—</span> }
+                        else
+                        {
+                            <span class="text-muted">—</span>
+                        }
                     </dd>
 
                     @if (!string.IsNullOrEmpty(Model.OriginalFileName))
@@ -93,7 +107,7 @@
                             <strong>@Model.OriginalFileName</strong>
                             <span class="text-muted small ms-2">
                                 (@Model.FileExtension &nbsp;·&nbsp;
-                                 @((Model.FileSizeBytes / 1024.0).ToString("N1")) KB)
+                                @((Model.FileSizeBytes / 1024.0).ToString("N1")) KB)
                             </span>
                         </dd>
                     }
@@ -119,12 +133,23 @@
             </div>
         </div>
 
-        <!-- Enviar a revisión -->
-        @if (Model.Status == "Draft")
+        <!-- ── Enviar a revisión ──────────────────────────────────────────────
+             Visible cuando: Draft (primera vez) o PendingChanges (segunda ronda) -->
+        @if (Model.Status is "Draft" or "PendingChanges")
         {
-            <div class="card border-0 shadow-sm border-start border-4 border-warning mb-4">
+            var isSecond = Model.Status == "PendingChanges";
+            var borderColor = isSecond ? "border-info" : "border-warning";
+            var iconColor = isSecond ? "text-info" : "text-warning";
+            var btnColor = isSecond ? "btn-info" : "btn-warning text-dark";
+            var label = isSecond ? "Enviar a 2ª Revisión" : "Enviar a Revisión";
+
+            <div class="card border-0 shadow-sm border-start border-4 @borderColor mb-4">
                 <div class="card-header bg-white border-bottom fw-semibold">
-                    <i class="bi bi-send me-2 text-warning"></i>Enviar a Revisión
+                    <i class="bi bi-send me-2 @iconColor"></i>@label
+                    @if (isSecond)
+                    {
+                        <span class="badge bg-info text-dark ms-2">Segunda ronda</span>
+                    }
                 </div>
                 <div class="card-body">
                     <form asp-action="SubmitForReview" method="post">
@@ -154,88 +179,170 @@
                         {
                             <p class="text-muted small">No hay revisores disponibles.</p>
                         }
-                        <button type="submit" class="btn btn-warning text-dark btn-sm"
-                                onclick="return document.querySelectorAll(
-                                    'input[name=ReviewerIds]:checked').length > 0
-                                    || alert('Seleccione al menos un revisor.')">
-                            <i class="bi bi-send me-1"></i>Enviar a Revisión
+                        <button type="submit" class="btn @btnColor btn-sm">
+                            <i class="bi bi-send me-1"></i>@label
                         </button>
                     </form>
                 </div>
             </div>
         }
 
-        <!-- Mi aprobación pendiente -->
-        @{
-            var myApproval = Model.Approvals.FirstOrDefault(a =>
-                a.ReviewerName == User.Identity!.Name && a.Status == "Pending");
-        }
-        @if (myApproval != null && Model.Status == "UnderReview")
-        {
-            <div class="card border-0 shadow-sm border-start border-4 border-primary mb-4">
-                <div class="card-header bg-white border-bottom fw-semibold">
-                    <i class="bi bi-person-check me-2 text-primary"></i>Tu Aprobación Pendiente
-                </div>
-                <div class="card-body">
-                    <form asp-action="ProcessApproval" method="post">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="DocumentId" value="@Model.Id" />
-                        <input type="hidden" name="ApprovalId" value="@myApproval.Id" />
-                        <div class="mb-3">
-                            <label class="form-label small fw-semibold">
-                                Comentarios (opcional)
-                            </label>
-                            <textarea name="Comments" class="form-control" rows="2"
-                                      placeholder="Observaciones o razón del rechazo..."></textarea>
-                        </div>
-                        <div class="d-flex gap-2">
-                            <button type="submit" name="Action" value="approve"
-                                    class="btn btn-success btn-sm">
-                                <i class="bi bi-check-lg me-1"></i>Aprobar
-                            </button>
-                            <button type="submit" name="Action" value="reject"
-                                    class="btn btn-danger btn-sm"
-                                    onclick="return confirm('¿Rechazar este documento?')">
-                                <i class="bi bi-x-lg me-1"></i>Rechazar
-                            </button>
-                        </div>
-                    </form>
-                </div>
+        <!-- ── Panel de Aprobaciones ─────────────────────────────────────────
+             Muestra la línea de tiempo de revisores + acciones del revisor actual -->
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom fw-semibold d-flex align-items-center gap-2">
+                <i class="bi bi-check2-circle text-primary"></i>Flujo de Aprobación
+                <partial name="_StatusBadge" model="Model.Status" />
             </div>
-        }
+            <div class="card-body">
+
+                @* Línea de tiempo de revisores *@
+                @if (Model.Approvals.Any())
+                {
+                    <ol class="list-group list-group-numbered mb-3">
+                        @foreach (var a in Model.Approvals.OrderBy(x => x.Order))
+                        {
+                            var (badgeCls, badgeIcon, badgeLbl) = a.Status switch
+                            {
+                                "Approved" => ("success", "bi-check-circle-fill", "Aprobado"),
+                                "Rejected" => ("danger", "bi-x-circle-fill", "Rechazado"),
+                                "RequestChanges" => ("info", "bi-pencil-fill", "Solicita cambios"),
+                                _ => ("secondary", "bi-hourglass", "Pendiente"),
+                            };
+                            <li class="list-group-item d-flex align-items-start gap-3 border-0 px-0">
+                                <div class="flex-grow-1">
+                                    <div class="d-flex justify-content-between">
+                                        <strong>@a.ReviewerName</strong>
+                                        <span class="badge bg-@badgeCls">
+                                            <i class="bi @badgeIcon me-1"></i>@badgeLbl
+                                        </span>
+                                    </div>
+                                    @if (!string.IsNullOrEmpty(a.Comments))
+                                    {
+                                        <p class="text-muted small mb-0 mt-1">
+                                            <i class="bi bi-chat-left-quote me-1"></i>@a.Comments
+                                        </p>
+                                    }
+                                    @if (a.ReviewedAt.HasValue)
+                                    {
+                                        <p class="text-muted small mb-0">
+                                            <i class="bi bi-clock me-1"></i>
+                                            @a.ReviewedAt.Value.ToString("dd/MM/yyyy HH:mm")
+                                        </p>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ol>
+                }
+                else
+                {
+                    <p class="text-muted small mb-3">No hay revisores asignados aún.</p>
+                }
+
+                @* Acciones: solo si el documento está en revisión y el usuario tiene una aprobación pendiente *@
+                @if (isInReview && canReview && myPending != null)
+                {
+                    <hr class="my-3" />
+                    <p class="small fw-semibold mb-2">Tu revisión:</p>
+                    <div class="d-flex flex-column gap-2">
+
+                        @* Aprobar *@
+                        <form asp-action="Approve" asp-route-id="@Model.Id" method="post">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@Model.Id" />
+                            <div class="input-group input-group-sm">
+                                <input type="text" name="comments" class="form-control"
+                                       placeholder="Comentarios (opcional)" maxlength="500" />
+                                <button class="btn btn-success" type="submit">
+                                    <i class="bi bi-check-lg me-1"></i>Aprobar
+                                </button>
+                            </div>
+                        </form>
+
+                        @* Solicitar cambios *@
+                        <form asp-action="RequestChanges" asp-route-id="@Model.Id" method="post">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@Model.Id" />
+                            <div class="input-group input-group-sm">
+                                <input type="text" name="comments" class="form-control"
+                                       placeholder="Describe los cambios requeridos (obligatorio)"
+                                       required maxlength="500" />
+                                <button class="btn btn-outline-info" type="submit">
+                                    <i class="bi bi-pencil me-1"></i>Solicitar Cambios
+                                </button>
+                            </div>
+                        </form>
+
+                        @* Rechazar *@
+                        <form asp-action="Reject" asp-route-id="@Model.Id" method="post"
+                              onsubmit="return confirm('¿Rechazar definitivamente este documento? Esta acción no se puede deshacer.')">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@Model.Id" />
+                            <div class="input-group input-group-sm">
+                                <input type="text" name="comments" class="form-control"
+                                       placeholder="Motivo del rechazo (obligatorio)"
+                                       required maxlength="500" />
+                                <button class="btn btn-outline-danger" type="submit">
+                                    <i class="bi bi-x-lg me-1"></i>Rechazar
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                }
+
+                @* Cambios pendientes — aviso al autor *@
+                @if (Model.Status == "PendingChanges")
+                {
+                    var changeRequest = Model.Approvals
+                        .Where(a => a.Status == "RequestChanges")
+                        .OrderByDescending(a => a.ReviewedAt)
+                        .FirstOrDefault();
+
+                    <div class="alert alert-info d-flex gap-2 mt-3 mb-0">
+                        <i class="bi bi-pencil-fill fs-5 flex-shrink-0"></i>
+                        <div>
+                            <strong>Se han solicitado cambios</strong>
+                            @if (changeRequest != null && !string.IsNullOrEmpty(changeRequest.Comments))
+                            {
+                                <p class="mb-1 mt-1">@changeRequest.Comments</p>
+                                <p class="small mb-0">— @changeRequest.ReviewerName</p>
+                            }
+                            <p class="small mb-0 mt-2">
+                                Realiza los cambios necesarios y vuelve a enviar el documento a revisión.
+                            </p>
+                        </div>
+                    </div>
+                }
+
+                @* Rechazado — aviso al autor *@
+                @if (Model.Status == "Rejected")
+                {
+                    var rejection = Model.Approvals
+                        .Where(a => a.Status == "Rejected")
+                        .OrderByDescending(a => a.ReviewedAt)
+                        .FirstOrDefault();
+
+                    <div class="alert alert-danger d-flex gap-2 mt-3 mb-0">
+                        <i class="bi bi-x-circle-fill fs-5 flex-shrink-0"></i>
+                        <div>
+                            <strong>Documento rechazado</strong>
+                            @if (rejection != null && !string.IsNullOrEmpty(rejection.Comments))
+                            {
+                                <p class="mb-1 mt-1">@rejection.Comments</p>
+                                <p class="small mb-0">— @rejection.ReviewerName</p>
+                            }
+                        </div>
+                    </div>
+                }
+
+            </div>
+        </div>
+
     </div>
 
     <!-- Columna derecha -->
     <div class="col-lg-4">
-        <!-- Revisores -->
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-header bg-white border-bottom fw-semibold small">
-                <i class="bi bi-person-check me-2 text-primary"></i>
-                Revisores (@Model.Approvals.Count)
-            </div>
-            <ul class="list-group list-group-flush">
-                @if (!Model.Approvals.Any())
-                {
-                    <li class="list-group-item text-muted small text-center py-3">
-                        Sin revisores asignados
-                    </li>
-                }
-                @foreach (var a in Model.Approvals)
-                {
-                    <li class="list-group-item d-flex align-items-center gap-2 py-2">
-                        <span class="badge rounded-pill bg-light text-dark border">@a.Order</span>
-                        <div class="flex-grow-1">
-                            <div class="small fw-semibold">@a.ReviewerName</div>
-                            @if (!string.IsNullOrEmpty(a.Comments))
-                            {
-                                <div class="text-muted" style="font-size:.75rem">@a.Comments</div>
-                            }
-                        </div>
-                        @Html.Partial("_StatusBadge", a.Status)
-                    </li>
-                }
-            </ul>
-        </div>
 
         <!-- Historial -->
         <div class="card border-0 shadow-sm">
@@ -270,5 +377,6 @@
                 }
             </ul>
         </div>
+
     </div>
 </div>

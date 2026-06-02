@@ -114,6 +114,7 @@ public class DocumentService
                 .Select(a => new ApprovalRowViewModel
                 {
                     Id = a.Id,
+                    ReviewerId = a.ReviewerId,          // ← necesario para el panel de revisión
                     ReviewerName = a.Reviewer.Username,
                     Order = a.ApprovalOrder,
                     Status = a.Status.ToString(),
@@ -176,7 +177,7 @@ public class DocumentService
 
         await AddAuditAsync(doc, userId, "Created", null, "Draft");
         await SyncPgAuditAsync(doc, userId, "Created", null, "Draft");
-        await SyncSearchServiceAsync(doc);   // ← indexa en MongoDB via Node.js
+        await SyncSearchServiceAsync(doc);
 
         return (true, null, doc.Id);
     }
@@ -211,28 +212,36 @@ public class DocumentService
 
         await _sql.SaveChangesAsync();
         await AddAuditAsync(doc, userId, "Updated", null, null);
-        await SyncSearchServiceAsync(doc);   // ← actualiza índice en MongoDB
+        await SyncSearchServiceAsync(doc);
 
         return (true, null);
     }
 
     // ── Enviar a revisión ─────────────────────────────────────────────────────
+    // ✅ REEMPLAZA el SubmitForReviewAsync original.
+    // Ahora soporta:  Draft → UnderReview  y  PendingChanges → UnderSecondReview
 
     public async Task<(bool ok, string? error)> SubmitForReviewAsync(
         SubmitReviewViewModel form, int userId)
     {
-        var doc = await _sql.Documents.FindAsync(form.DocumentId);
+        var doc = await _sql.Documents
+            .Include(d => d.Approvals)
+            .FirstOrDefaultAsync(d => d.Id == form.DocumentId);
+
         if (doc == null) return (false, "Documento no encontrado.");
-        if (doc.Status != DocumentStatus.Draft)
-            return (false, "Solo se pueden enviar documentos en estado Borrador.");
-        if (form.ReviewerIds.Count == 0)
-            return (false, "Seleccione al menos un revisor.");
 
-        var old = doc.Status.ToString();
-        doc.Status = DocumentStatus.UnderReview;
+        if (!doc.CanSubmitForReview())
+            return (false, "El documento debe estar en Borrador o Cambios Pendientes para enviarse a revisión.");
 
-        var existing = _sql.DocumentApprovals.Where(a => a.DocumentId == doc.Id);
-        _sql.DocumentApprovals.RemoveRange(existing);
+        if (form.ReviewerIds == null || form.ReviewerIds.Count == 0)
+            return (false, "Selecciona al menos un revisor.");
+
+        var oldStatus = doc.Status.ToString();
+        var isSecondRound = doc.Status == DocumentStatus.PendingChanges;
+
+        // En segunda ronda, limpiar aprobaciones previas
+        if (isSecondRound)
+            _sql.DocumentApprovals.RemoveRange(doc.Approvals);
 
         for (int i = 0; i < form.ReviewerIds.Count; i++)
             _sql.DocumentApprovals.Add(new DocumentApproval
@@ -242,72 +251,169 @@ public class DocumentService
                 ApprovalOrder = i + 1,
             });
 
+        doc.Status = isSecondRound ? DocumentStatus.UnderSecondReview : DocumentStatus.UnderReview;
+        doc.UpdatedAt = DateTime.UtcNow;
+
         await _sql.SaveChangesAsync();
-        await AddAuditAsync(doc, userId, "StatusChange", old, "UnderReview");
-        await SyncPgAuditAsync(doc, userId, "StatusChange", old, "UnderReview");
-        await SyncSearchServiceAsync(doc);   // ← actualiza estado en MongoDB
+        await AddAuditAsync(doc, userId, "StatusChange", oldStatus, doc.Status.ToString());
+        await SyncPgAuditAsync(doc, userId, "StatusChange", oldStatus, doc.Status.ToString());
+        await SyncSearchServiceAsync(doc);
 
         return (true, null);
     }
 
-    // ── Procesar aprobación ───────────────────────────────────────────────────
+    // ── Aprobar ───────────────────────────────────────────────────────────────
+    // ✅ REEMPLAZA ProcessApprovalAsync (action = "approve").
+    // Detecta automáticamente cuando todos los revisores han aprobado.
 
-    public async Task<(bool ok, string? error)> ProcessApprovalAsync(
-        ApprovalActionViewModel form, int userId)
+    public async Task<(bool ok, string? error)> ApproveAsync(
+        int documentId, int reviewerId, string? comments)
     {
-        var approval = await _sql.DocumentApprovals
-            .Include(a => a.Document)
-            .FirstOrDefaultAsync(a => a.Id == form.ApprovalId
-                                   && a.DocumentId == form.DocumentId
-                                   && a.ReviewerId == userId
-                                   && a.Status == ApprovalStatus.Pending);
+        var doc = await _sql.Documents
+            .Include(d => d.Approvals)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+
+        if (doc == null) return (false, "Documento no encontrado.");
+        if (!doc.IsInReview()) return (false, "El documento no está en revisión.");
+
+        var approval = doc.Approvals
+            .Where(a => a.ReviewerId == reviewerId && a.Status == ApprovalStatus.Pending)
+            .OrderBy(a => a.ApprovalOrder)
+            .FirstOrDefault();
 
         if (approval == null)
-            return (false, "Aprobación no encontrada o ya procesada.");
+            return (false, "No tienes una revisión pendiente asignada para este documento.");
 
-        approval.Comments = form.Comments;
+        approval.Status = ApprovalStatus.Approved;
+        approval.Comments = comments;
         approval.ReviewedAt = DateTime.UtcNow;
-        var doc = approval.Document;
 
-        if (form.Action.Equals("approve", StringComparison.OrdinalIgnoreCase))
+        var oldStatus = doc.Status.ToString();
+
+        // ¿Todos los revisores han aprobado ya?
+        var allApproved = doc.Approvals
+            .Where(a => a.Id != approval.Id)
+            .All(a => a.Status == ApprovalStatus.Approved);
+
+        if (allApproved)
         {
-            approval.Status = ApprovalStatus.Approved;
-            var all = await _sql.DocumentApprovals
-                .Where(a => a.DocumentId == doc.Id).ToListAsync();
-            if (all.All(a => a.Status == ApprovalStatus.Approved))
-            {
-                doc.Status = DocumentStatus.Approved;
-                doc.ApprovedAt = DateTime.UtcNow;
-                await AddAuditAsync(doc, userId, "StatusChange", "UnderReview", "Approved");
-                await SyncPgAuditAsync(doc, userId, "Approved", "UnderReview", "Approved");
-            }
+            doc.Status = DocumentStatus.Approved;
+            doc.ApprovedAt = DateTime.UtcNow;
+            doc.UpdatedAt = DateTime.UtcNow;
+            await _sql.SaveChangesAsync();
+            await AddAuditAsync(doc, reviewerId, "StatusChange", oldStatus, "Approved");
+            await SyncPgAuditAsync(doc, reviewerId, "Approved", oldStatus, "Approved");
+            await SyncSearchServiceAsync(doc);
         }
         else
         {
-            approval.Status = ApprovalStatus.Rejected;
-            doc.Status = DocumentStatus.Draft;
-            await AddAuditAsync(doc, userId, "StatusChange", "UnderReview", "Draft");
-            await SyncPgAuditAsync(doc, userId, "Rejected", "UnderReview", "Draft");
+            await _sql.SaveChangesAsync();
+            await AddAuditAsync(doc, reviewerId, "ApprovalReviewed", "Pending", "Approved");
         }
 
+        return (true, null);
+    }
+
+    // ── Solicitar cambios (estado intermedio nuevo) ───────────────────────────
+    // ✅ NUEVO — no existía en el servicio original.
+
+    public async Task<(bool ok, string? error)> RequestChangesAsync(
+        int documentId, int reviewerId, string comments)
+    {
+        var doc = await _sql.Documents
+            .Include(d => d.Approvals)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+
+        if (doc == null) return (false, "Documento no encontrado.");
+        if (!doc.IsInReview())
+            return (false, "Solo se pueden solicitar cambios cuando el documento está en revisión.");
+
+        var approval = doc.Approvals
+            .Where(a => a.ReviewerId == reviewerId && a.Status == ApprovalStatus.Pending)
+            .OrderBy(a => a.ApprovalOrder)
+            .FirstOrDefault();
+
+        if (approval == null)
+            return (false, "No tienes una revisión pendiente asignada para este documento.");
+
+        approval.Status = ApprovalStatus.RequestChanges;
+        approval.Comments = comments;
+        approval.ReviewedAt = DateTime.UtcNow;
+
+        var oldStatus = doc.Status.ToString();
+        doc.Status = DocumentStatus.PendingChanges;
+        doc.UpdatedAt = DateTime.UtcNow;
+
         await _sql.SaveChangesAsync();
-        await SyncSearchServiceAsync(doc);   // ← actualiza estado en MongoDB
+        await AddAuditAsync(doc, reviewerId, "StatusChange", oldStatus, "PendingChanges");
+        await SyncPgAuditAsync(doc, reviewerId, "StatusChange", oldStatus, "PendingChanges");
+        await SyncSearchServiceAsync(doc);
+
+        return (true, null);
+    }
+
+    // ── Rechazar definitivamente ──────────────────────────────────────────────
+    // ✅ REEMPLAZA ProcessApprovalAsync (action = "reject").
+    // El documento pasa a Rejected (no vuelve a Draft como antes).
+
+    public async Task<(bool ok, string? error)> RejectAsync(
+        int documentId, int reviewerId, string comments)
+    {
+        var doc = await _sql.Documents
+            .Include(d => d.Approvals)
+            .FirstOrDefaultAsync(d => d.Id == documentId);
+
+        if (doc == null) return (false, "Documento no encontrado.");
+        if (!doc.IsInReview())
+            return (false, "Solo se pueden rechazar documentos en revisión.");
+
+        var approval = doc.Approvals
+            .Where(a => a.ReviewerId == reviewerId && a.Status == ApprovalStatus.Pending)
+            .OrderBy(a => a.ApprovalOrder)
+            .FirstOrDefault();
+
+        if (approval == null)
+            return (false, "No tienes una revisión pendiente asignada para este documento.");
+
+        approval.Status = ApprovalStatus.Rejected;
+        approval.Comments = comments;
+        approval.ReviewedAt = DateTime.UtcNow;
+
+        var oldStatus = doc.Status.ToString();
+        doc.Status = DocumentStatus.Rejected;
+        doc.RejectedAt = DateTime.UtcNow;
+        doc.UpdatedAt = DateTime.UtcNow;
+
+        await _sql.SaveChangesAsync();
+        await AddAuditAsync(doc, reviewerId, "StatusChange", oldStatus, "Rejected");
+        await SyncPgAuditAsync(doc, reviewerId, "Rejected", oldStatus, "Rejected");
+        await SyncSearchServiceAsync(doc);
+
         return (true, null);
     }
 
     // ── Marcar obsoleto ───────────────────────────────────────────────────────
+    // ✅ REEMPLAZA MarkObsoleteAsync original.
+    // Cambia el tipo de retorno de bool a (bool ok, string? error)
+    // para ser consistente con el DocumentsController.
 
-    public async Task<bool> MarkObsoleteAsync(int id, int userId)
+    public async Task<(bool ok, string? error)> MarkObsoleteAsync(int id, int userId)
     {
         var doc = await _sql.Documents.FindAsync(id);
-        if (doc == null) return false;
+        if (doc == null) return (false, "Documento no encontrado.");
+        if (doc.Status == DocumentStatus.Obsolete)
+            return (false, "El documento ya está marcado como Obsoleto.");
+
         var old = doc.Status.ToString();
         doc.Status = DocumentStatus.Obsolete;
+        doc.UpdatedAt = DateTime.UtcNow;
+
         await _sql.SaveChangesAsync();
         await AddAuditAsync(doc, userId, "StatusChange", old, "Obsolete");
         await SyncPgAuditAsync(doc, userId, "Obsolete", old, "Obsolete");
-        await SyncSearchServiceAsync(doc);   // ← actualiza estado en MongoDB
-        return true;
+        await SyncSearchServiceAsync(doc);
+
+        return (true, null);
     }
 
     // ── Descargar archivo ─────────────────────────────────────────────────────
@@ -340,7 +446,7 @@ public class DocumentService
 
             var response = await client.GetAsync(url);
             if (!response.IsSuccessStatusCode)
-                return FallbackSearchAsync(query, category, status).Result;
+                return await FallbackSearchAsync(query, category, status);
 
             var json = await response.Content.ReadAsStringAsync();
             var result = JsonSerializer.Deserialize<SearchServiceResponse>(json,
@@ -370,7 +476,7 @@ public class DocumentService
         }
     }
 
-    // ── Búsqueda fallback con SQL Server (si Node.js no está disponible) ──────
+    // ── Búsqueda fallback con SQL Server ──────────────────────────────────────
 
     private async Task<SearchResultViewModel> FallbackSearchAsync(
         string? query, string? category, string? status)
@@ -404,7 +510,7 @@ public class DocumentService
                 Category = d.Category,
                 Standard = d.Standard,
                 Tags = d.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                  .Select(t => t.Trim()).ToList(),
+                                    .Select(t => t.Trim()).ToList(),
                 Status = d.Status.ToString(),
                 FileExtension = d.FileExtension,
             }).ToList(),
@@ -424,8 +530,10 @@ public class DocumentService
                 Standard = g.Key.Standard,
                 Approved = g.Count(d => d.Status == DocumentStatus.Approved),
                 Draft = g.Count(d => d.Status == DocumentStatus.Draft),
-                UnderReview = g.Count(d => d.Status == DocumentStatus.UnderReview),
-                Obsolete = g.Count(d => d.Status == DocumentStatus.Obsolete),
+                UnderReview = g.Count(d => d.Status == DocumentStatus.UnderReview
+                                        || d.Status == DocumentStatus.UnderSecondReview),
+                Obsolete = g.Count(d => d.Status == DocumentStatus.Obsolete
+                                        || d.Status == DocumentStatus.Rejected),
                 Total = g.Count(),
                 LastApproved = g.Max(d => d.ApprovedAt),
             })
@@ -496,8 +604,8 @@ public class DocumentService
                 status = doc.Status.ToString(),
                 isPublic = doc.IsPublic,
             };
-            var json = JsonSerializer.Serialize(payload);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var content = new StringContent(
+                JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
             await client.PostAsync("/api/documents", content);
         }
         catch (Exception ex)
@@ -542,7 +650,7 @@ public class DocumentService
             });
             await _pg.SaveChangesAsync();
         }
-        catch { /* PostgreSQL no disponible — continúa */ }
+        catch { /* PostgreSQL no disponible — continúa sin bloquear */ }
     }
 
     private static async Task<(bool ok, string? err, string stored,

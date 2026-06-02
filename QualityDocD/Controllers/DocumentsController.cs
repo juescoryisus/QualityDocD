@@ -51,6 +51,13 @@ public class DocumentsController : Controller
         var vm = await _svc.GetDetailAsync(id);
         if (vm == null) return NotFound();
 
+        // Solo se puede editar si está en Borrador o Cambios Pendientes
+        if (vm.Status is not ("Draft" or "PendingChanges"))
+        {
+            TempData["Error"] = "Solo se pueden editar documentos en estado Borrador o Cambios Pendientes.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
         return View(new DocumentFormViewModel
         {
             Id = vm.Id,
@@ -86,19 +93,57 @@ public class DocumentsController : Controller
     {
         var (ok, error) = await _svc.SubmitForReviewAsync(model, GetUserId());
         TempData[ok ? "Success" : "Error"] = ok
-            ? "Documento enviado a revisión." : error;
+            ? "Documento enviado a revisión."
+            : error;
         return RedirectToAction(nameof(Details), new { id = model.DocumentId });
     }
 
-    // POST /Documents/ProcessApproval
+    // POST /Documents/Approve/5
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> ProcessApproval(ApprovalActionViewModel model)
+    [Authorize(Roles = "Admin,Manager,Reviewer")]
+    public async Task<IActionResult> Approve(int id, string? comments)
     {
-        var (ok, error) = await _svc.ProcessApprovalAsync(model, GetUserId());
+        var (ok, error) = await _svc.ApproveAsync(id, GetUserId(), comments);
         TempData[ok ? "Success" : "Error"] = ok
-            ? (model.Action == "approve" ? "Documento aprobado." : "Documento rechazado.")
+            ? "Revisión registrada. El documento avanza en el flujo."
             : error;
-        return RedirectToAction(nameof(Details), new { id = model.DocumentId });
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    // POST /Documents/Reject/5  — Rechazar definitivamente
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Roles = "Admin,Manager,Reviewer")]
+    public async Task<IActionResult> Reject(int id, string? comments)
+    {
+        if (string.IsNullOrWhiteSpace(comments))
+        {
+            TempData["Error"] = "Debes indicar el motivo del rechazo.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        var (ok, error) = await _svc.RejectAsync(id, GetUserId(), comments);
+        TempData[ok ? "Success" : "Error"] = ok
+            ? "Documento rechazado definitivamente."
+            : error;
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    // POST /Documents/RequestChanges/5  — Solicitar cambios (estado intermedio)
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Roles = "Admin,Manager,Reviewer")]
+    public async Task<IActionResult> RequestChanges(int id, string? comments)
+    {
+        if (string.IsNullOrWhiteSpace(comments))
+        {
+            TempData["Error"] = "Debes describir los cambios requeridos.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        var (ok, error) = await _svc.RequestChangesAsync(id, GetUserId(), comments);
+        TempData[ok ? "Success" : "Error"] = ok
+            ? "Se han solicitado cambios. El documento queda en estado 'Cambios Pendientes'."
+            : error;
+        return RedirectToAction(nameof(Details), new { id });
     }
 
     // POST /Documents/MarkObsolete/5
@@ -106,10 +151,10 @@ public class DocumentsController : Controller
     [Authorize(Roles = "Admin,Manager")]
     public async Task<IActionResult> MarkObsolete(int id)
     {
-        var ok = await _svc.MarkObsoleteAsync(id, GetUserId());
+        var (ok, error) = await _svc.MarkObsoleteAsync(id, GetUserId());
         TempData[ok ? "Success" : "Error"] = ok
             ? "Documento marcado como Obsoleto."
-            : "No se encontró el documento.";
+            : error;
         return RedirectToAction(nameof(Details), new { id });
     }
 
@@ -118,10 +163,11 @@ public class DocumentsController : Controller
     {
         var result = await _svc.DownloadAsync(id, GetUserId());
         if (result == null) return NotFound();
-        var (stream, fileName, ct) = result.Value;
-        return File(stream, ct, fileName);
+        var (stream, fileName, contentType) = result.Value;
+        return File(stream, contentType, fileName);
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
     private int GetUserId() =>
-        int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "0");
+        int.Parse(User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier) ?? "0");
 }

@@ -1,6 +1,33 @@
 ﻿namespace QualityDocD.Models.Domain;
 
-public enum DocumentStatus { Draft, UnderReview, Approved, Obsolete }
+/// <summary>
+/// Estados del documento en el flujo de aprobación.
+/// Draft → UnderReview → PendingChanges ↔ UnderReview → Approved → Obsolete
+///                     ↘ Rejected
+/// </summary>
+public enum DocumentStatus
+{
+    /// <summary>Borrador inicial, aún no enviado a revisión.</summary>
+    Draft,
+
+    /// <summary>Enviado a revisores, esperando aprobaciones.</summary>
+    UnderReview,
+
+    /// <summary>Un revisor solicitó cambios; el autor debe corregir y reenviar.</summary>
+    PendingChanges,
+
+    /// <summary>En segunda ronda de revisión tras aplicar los cambios solicitados.</summary>
+    UnderSecondReview,
+
+    /// <summary>Aprobado por todos los revisores requeridos.</summary>
+    Approved,
+
+    /// <summary>Rechazado definitivamente por los revisores.</summary>
+    Rejected,
+
+    /// <summary>Versión obsoleta, reemplazada por una versión más reciente.</summary>
+    Obsolete
+}
 
 public class Document
 {
@@ -29,6 +56,7 @@ public class Document
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
     public DateTime? ApprovedAt { get; set; }
+    public DateTime? RejectedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }
 
     // FK y navegación
@@ -37,4 +65,18 @@ public class Document
 
     public ICollection<DocumentApproval> Approvals { get; set; } = new List<DocumentApproval>();
     public ICollection<AuditLog> AuditLogs { get; set; } = new List<AuditLog>();
+
+    // ── Helpers de dominio ────────────────────────────────────────────────────
+
+    /// <summary>Retorna true si el documento puede ser enviado a revisión.</summary>
+    public bool CanSubmitForReview() =>
+        Status is DocumentStatus.Draft or DocumentStatus.PendingChanges;
+
+    /// <summary>Retorna true si el documento está en algún estado de revisión activa.</summary>
+    public bool IsInReview() =>
+        Status is DocumentStatus.UnderReview or DocumentStatus.UnderSecondReview;
+
+    /// <summary>Retorna true si el documento tiene un estado final (no puede cambiar a menos que se cree nueva versión).</summary>
+    public bool IsFinal() =>
+        Status is DocumentStatus.Approved or DocumentStatus.Rejected or DocumentStatus.Obsolete;
 }

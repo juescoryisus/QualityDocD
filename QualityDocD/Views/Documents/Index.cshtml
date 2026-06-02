@@ -1,5 +1,7 @@
 ﻿@model QualityDocD.Models.ViewModels.DocumentIndexViewModel
-@{ ViewData["Title"] = "Documentos"; }
+@{
+    ViewData["Title"] = "Documentos";
+}
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="fw-bold mb-0">
@@ -24,8 +26,13 @@
                 <select name="status" class="form-select form-select-sm">
                     <option value="">— Todos —</option>
                     @foreach (var st in new[] {
-                        ("Draft","Borrador"), ("UnderReview","En Revisión"),
-                        ("Approved","Aprobado"), ("Obsolete","Obsoleto") })
+                        ("Draft",             "Borrador"),
+                        ("UnderReview",       "En Revisión"),
+                        ("PendingChanges",    "Cambios Pendientes"),
+                        ("UnderSecondReview", "2ª Revisión"),
+                        ("Approved",          "Aprobado"),
+                        ("Rejected",          "Rechazado"),
+                        ("Obsolete",          "Obsoleto") })
                     {
                         <option value="@st.Item1" selected="@(Model.FilterStatus == st.Item1)">
                             @st.Item2
@@ -37,7 +44,7 @@
                 <label class="form-label small fw-semibold mb-1">Categoría</label>
                 <select name="category" class="form-select form-select-sm">
                     <option value="">— Todas —</option>
-                    @foreach (var cat in new[] { "Manual","Procedure","Record","Audit","Other" })
+                    @foreach (var cat in new[] { "Manual", "Procedure", "Record", "Audit", "Other" })
                     {
                         <option value="@cat" selected="@(Model.FilterCategory == cat)">@cat</option>
                     }
@@ -55,18 +62,28 @@
     </div>
 </div>
 
-<!-- Contadores rápidos -->
+<!-- Contadores rápidos por estado -->
 <div class="d-flex flex-wrap gap-2 mb-3">
-    @foreach (var (label, key, color) in new[] {
-        ("Todos","","primary"), ("Borradores","Draft","secondary"),
-        ("En Revisión","UnderReview","warning"), ("Aprobados","Approved","success"),
-        ("Obsoletos","Obsolete","danger") })
+    @{
+        var allStatuses = new[] {
+            ("",             "Todos",              "primary"),
+            ("Draft",        "Borradores",         "secondary"),
+            ("UnderReview",  "En Revisión",        "warning"),
+            ("PendingChanges","Cambios Pend.",     "info"),
+            ("UnderSecondReview","2ª Revisión",    "primary"),
+            ("Approved",     "Aprobados",          "success"),
+            ("Rejected",     "Rechazados",         "danger"),
+            ("Obsolete",     "Obsoletos",          "dark"),
+        };
+    }
+    @foreach (var (key, label, color) in allStatuses)
     {
-        var count  = key == "" ? Model.Documents.Count : Model.StatusCounts.GetValueOrDefault(key, 0);
+        var count = key == "" ? Model.Documents.Count : Model.StatusCounts.GetValueOrDefault(key, 0);
         var active = (Model.FilterStatus ?? "") == key;
+        if (count == 0 && key != "" && !active) { continue; }
         <a asp-action="Index" asp-route-status="@key" asp-route-category="@Model.FilterCategory"
            class="badge fs-6 text-decoration-none
-                  @(active ? $"bg-{color}" : "bg-light text-dark border")">
+            @(active ? $"bg-{color}" : "bg-light text-dark border")">
             @label (@count)
         </a>
     }
@@ -79,83 +96,78 @@
             <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th style="width:100px">Código</th>
+                        <th class="text-muted small ps-3" style="width:50px">ID</th>
+                        <th style="width:110px">Código</th>
                         <th>Título</th>
                         <th>Categoría</th>
                         <th>Norma</th>
-                        <th class="text-center">Ver.</th>
+                        <th class="text-center" style="width:50px">Ver.</th>
                         <th>Estado</th>
                         <th>Archivo</th>
                         <th>Creado por</th>
                         <th>Fecha</th>
-                        <th style="width:110px"></th>
+                        <th class="text-end pe-3">Acciones</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var doc in Model.Documents)
-                    {
-                        <tr>
-                            <td>
-                                <span class="badge bg-light text-dark border font-monospace">
-                                    @doc.Code
-                                </span>
-                            </td>
-                            <td class="fw-semibold">
-                                <a asp-action="Details" asp-route-id="@doc.Id"
-                                   class="text-decoration-none text-dark">@doc.Title</a>
-                                @if (doc.IsPublic)
-                                {
-                                    <span class="badge bg-info text-dark ms-1"
-                                          title="Público" style="font-size:.65rem">
-                                        <i class="bi bi-globe2"></i>
-                                    </span>
-                                }
-                            </td>
-                            <td><span class="text-muted small">@doc.Category</span></td>
-                            <td><span class="text-muted small">@doc.Standard</span></td>
-                            <td class="text-center">
-                                <span class="badge bg-light text-dark border">v@doc.Version</span>
-                            </td>
-                            <td>@Html.Partial("_StatusBadge", doc.Status)</td>
-                            <td>
-                                @if (!string.IsNullOrEmpty(doc.FileExtension))
-                                {
-                                    <span class="badge bg-light text-secondary border small text-uppercase">
-                                        @doc.FileExtension.TrimStart('.')
-                                    </span>
-                                }
-                            </td>
-                            <td class="text-muted small">@doc.CreatedBy</td>
-                            <td class="text-muted small text-nowrap">
-                                @doc.CreatedAt.ToString("dd/MM/yyyy")
-                            </td>
-                            <td>
-                                <div class="btn-group btn-group-sm">
-                                    <a asp-action="Details" asp-route-id="@doc.Id"
-                                       class="btn btn-outline-primary" title="Ver">
-                                        <i class="bi bi-eye"></i>
-                                    </a>
-                                    <a asp-action="Edit" asp-route-id="@doc.Id"
-                                       class="btn btn-outline-secondary" title="Editar">
-                                        <i class="bi bi-pencil"></i>
-                                    </a>
-                                    @if (!string.IsNullOrEmpty(doc.FileExtension))
-                                    {
-                                        <a asp-action="Download" asp-route-id="@doc.Id"
-                                           class="btn btn-outline-success" title="Descargar">
-                                            <i class="bi bi-download"></i>
-                                        </a>
-                                    }
-                                </div>
-                            </td>
-                        </tr>
-                    }
                     @if (!Model.Documents.Any())
                     {
                         <tr>
-                            <td colspan="10" class="text-center text-muted py-5">
-                                <i class="bi bi-inbox fs-2 d-block mb-2"></i>
-                                No se encontraron documentos con los filtros actuales.
+                            <td colspan="11" class="text-center text-muted py-5">
+                                <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                                No hay documentos con los filtros seleccionados.
+                            </td>
+                        </tr>
+                    }
+                    @foreach (var item in Model.Documents)
+                    {
+                        <tr>
+                            <td class="ps-3 text-muted small font-monospace">@item.Id</td>
+                            <td>
+                                <span class="badge bg-light text-dark border font-monospace">@item.Code</span>
+                            </td>
+                            <td>
+                                <a asp-action="Details" asp-route-id="@item.Id"
+                                   class="text-decoration-none fw-semibold text-dark">
+                                    @item.Title
+                                </a>
+                                @if (item.IsPublic)
+                                {
+                                    <i class="bi bi-globe2 ms-1 text-info small" title="Público"></i>
+                                }
+                            </td>
+                            <td class="small text-muted">@item.Category</td>
+                            <td class="small text-muted">@item.Standard</td>
+                            <td class="text-center small">v@(item.Version)</td>
+                            <td>@Html.Partial("_StatusBadge", item.Status)</td>
+                            <td class="small text-muted">
+                                @if (!string.IsNullOrEmpty(item.FileExtension))
+                                {
+                                    <span class="font-monospace">@item.FileExtension</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                            <td class="small">@item.CreatedBy</td>
+                            <td class="small text-muted text-nowrap">
+                                @item.CreatedAt.ToString("dd/MM/yyyy")
+                            </td>
+                            <td class="text-end pe-3">
+                                <div class="d-flex gap-1 justify-content-end">
+                                    <a asp-action="Details" asp-route-id="@item.Id"
+                                       class="btn btn-outline-primary btn-sm" title="Ver detalle">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    @if (item.Status is "Draft" or "PendingChanges")
+                                    {
+                                        <a asp-action="Edit" asp-route-id="@item.Id"
+                                           class="btn btn-outline-warning btn-sm" title="Editar">
+                                            <i class="bi bi-pencil"></i>
+                                        </a>
+                                    }
+                                </div>
                             </td>
                         </tr>
                     }

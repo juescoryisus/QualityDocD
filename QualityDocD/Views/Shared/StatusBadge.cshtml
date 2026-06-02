@@ -1,0 +1,17 @@
+﻿@model string
+@{
+    var (bg, icon, label) = Model switch
+    {
+        "Draft" => ("secondary", "bi-pencil-square", "Borrador"),
+        "UnderReview" => ("warning", "bi-hourglass-split", "En Revisión"),
+        "PendingChanges" => ("info", "bi-pencil-fill", "Cambios Pendientes"),
+        "UnderSecondReview" => ("primary", "bi-hourglass-top", "2ª Revisión"),
+        "Approved" => ("success", "bi-check-circle-fill", "Aprobado"),
+        "Rejected" => ("danger", "bi-x-circle-fill", "Rechazado"),
+        "Obsolete" => ("dark", "bi-archive-fill", "Obsoleto"),
+        _ => ("light", "bi-question", Model),
+    };
+}
+<span class="badge bg-@bg text-@(bg == "warning" || bg == "info" || bg == "light" ? "dark" : "white")">
+    <i class="bi @icon me-1"></i>@label
+</span>

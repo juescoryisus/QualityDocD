@@ -88,7 +88,6 @@ public class DocumentFormViewModel
     [Display(Name = "Archivo adjunto")]
     public IFormFile? File { get; set; }
 
-    // Datos del archivo existente (al editar)
     public string ExistingFileName { get; set; } = string.Empty;
     public string ExistingFileExt { get; set; } = string.Empty;
     public long ExistingFileSize { get; set; }
@@ -101,7 +100,7 @@ public class SubmitReviewViewModel
     public List<int> ReviewerIds { get; set; } = new();
 }
 
-// ── Acción de aprobación ──────────────────────────────────────────────────────
+// ── Acción de aprobación (legacy — ya no se usa en el flujo nuevo) ────────────
 public class ApprovalActionViewModel
 {
     public int DocumentId { get; set; }
@@ -114,6 +113,7 @@ public class ApprovalActionViewModel
 public class ApprovalRowViewModel
 {
     public int Id { get; set; }
+    public int ReviewerId { get; set; }          // necesario para el panel de revisión
     public string ReviewerName { get; set; } = string.Empty;
     public int Order { get; set; }
     public string Status { get; set; } = string.Empty;

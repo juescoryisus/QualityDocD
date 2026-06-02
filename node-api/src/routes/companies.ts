@@ -13,7 +13,10 @@ router.post("/companies", async (req, res): Promise<void> => {
 
   const [company] = await db
     .insert(companiesTable)
-    .values(parsed.data)
+    .values({
+      name: parsed.data.name,
+      slug: parsed.data.slug,
+    })
     .returning();
 
   res.status(201).json(company);

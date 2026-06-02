@@ -1,28 +1,18 @@
-#Requires -Version 5.1
-<#
-.SYNOPSIS
-    QualityDoc — Script de configuración y arranque automático.
-
-.DESCRIPTION
-    1. Verifica que Docker Desktop esté corriendo.
-    2. Copia .env.example → .env si no existe.
-    3. Levanta SQL Server, PostgreSQL y MongoDB con Docker Compose.
-    4. Espera a que los 3 motores estén listos (health checks).
-    5. Abre el proyecto QualityDocD en Visual Studio.
-
-.EXAMPLE
-    .\setup.ps1
-    .\setup.ps1 -SkipVS          # No abre Visual Studio al final
-    .\setup.ps1 -ResetData       # Borra los volúmenes y empieza de cero
-#>
 
 param(
+    [ValidateSet("All", "Infra", "Apps", "Portal")]
+    [string] $Mode = "All",
     [switch] $SkipVS,
     [switch] $ResetData
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# ── Archivos Compose ──────────────────────────────────────────────────────────
+$ComposeInfra  = "docker-compose.infra.yml"
+$ComposeApps   = "docker-compose.apps.yml"
+$ComposePortal = "docker-compose.portal.yml"
 
 # ── Colores de consola ────────────────────────────────────────────────────────
 function Write-Step  ($msg) { Write-Host "`n  ● $msg"  -ForegroundColor Cyan    }
@@ -33,10 +23,11 @@ function Write-Fail  ($msg) { Write-Host "  ✖ $msg"    -ForegroundColor Red   
 # ── Banner ────────────────────────────────────────────────────────────────────
 Clear-Host
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Blue
-Write-Host "  ║        QualityDoc — Setup rápido         ║" -ForegroundColor Blue
-Write-Host "  ║  SQL Server · PostgreSQL · MongoDB · VS  ║" -ForegroundColor Blue
-Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Blue
+Write-Host "  ╔══════════════════════════════════════════════════╗" -ForegroundColor Blue
+Write-Host "  ║         QualityDoc — Setup rápido                ║" -ForegroundColor Blue
+Write-Host "  ║  Infra · Apps · Portal  (3 composers)            ║" -ForegroundColor Blue
+Write-Host "  ╚══════════════════════════════════════════════════╝" -ForegroundColor Blue
+Write-Host "  Modo: $Mode" -ForegroundColor DarkCyan
 Write-Host ""
 
 # ── 0. Moverse a la carpeta del script ───────────────────────────────────────
@@ -78,72 +69,102 @@ if (-not (Test-Path ".env")) {
 # ── 3. Borrar datos si se pidió reset ─────────────────────────────────────────
 if ($ResetData) {
     Write-Step "Borrando volúmenes de datos (ResetData activado)..."
-    docker compose down -v 2>&1 | Out-Null
+    docker compose -f $ComposeInfra  down -v 2>&1 | Out-Null
+    docker compose -f $ComposeApps   down    2>&1 | Out-Null
+    docker compose -f $ComposePortal down    2>&1 | Out-Null
     Write-OK "Volúmenes eliminados. Las bases de datos se crearán desde cero."
 }
 
-# ── 4. Levantar Docker Compose ────────────────────────────────────────────────
-Write-Step "Levantando SQL Server, PostgreSQL y MongoDB..."
-
-docker compose up -d 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Fail "Error al ejecutar 'docker compose up -d'. Revisa el mensaje anterior."
-    exit 1
-}
-Write-OK "Contenedores iniciados."
-
-# ── 5. Esperar a que los 3 motores estén listos ───────────────────────────────
-Write-Step "Esperando a que los motores de base de datos estén listos..."
-
-$Services = @{
-    "qualitydoc_sqlserver" = "SQL Server"
-    "qualitydoc_postgres"  = "PostgreSQL"
-    "qualitydoc_mongodb"   = "MongoDB"
+# ── Función auxiliar: levantar un composer ────────────────────────────────────
+function Start-Compose ($File, $Label) {
+    Write-Step "Levantando $Label ($File)..."
+    docker compose -f $File up -d 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Error al levantar $Label. Revisa el mensaje anterior."
+        exit 1
+    }
+    Write-OK "$Label iniciado."
 }
 
-$MaxWait    = 120   # segundos máximos de espera
-$Interval   =   3   # segundos entre intentos
+# ── 4. Levantar según el modo ─────────────────────────────────────────────────
+switch ($Mode) {
+    "Infra"  { Start-Compose $ComposeInfra  "Infraestructura (SQL Server + PostgreSQL + MongoDB)" }
+    "Apps"   { Start-Compose $ComposeApps   "Backend (.NET + Node API + Search Service)" }
+    "Portal" { Start-Compose $ComposePortal "Portal (PHP)" }
+    "All" {
+        Start-Compose $ComposeInfra  "Infraestructura (SQL Server + PostgreSQL + MongoDB)"
+        Start-Compose $ComposeApps   "Backend (.NET + Node API + Search Service)"
+        Start-Compose $ComposePortal "Portal (PHP)"
+    }
+}
 
-foreach ($Container in $Services.Keys) {
-    $Name    = $Services[$Container]
-    $Elapsed = 0
-    $Ready   = $false
+# ── 5. Esperar a que los motores de BD estén listos ───────────────────────────
+if ($Mode -in @("Infra", "All")) {
+    Write-Step "Esperando a que los motores de base de datos estén listos..."
 
-    Write-Host "  Esperando $Name" -NoNewline -ForegroundColor White
+    $Services = @{
+        "qualitydoc_sqlserver" = "SQL Server"
+        "qualitydoc_postgres"  = "PostgreSQL"
+        "qualitydoc_mongodb"   = "MongoDB"
+    }
 
-    while ($Elapsed -lt $MaxWait) {
-        $Status = docker inspect --format='{{.State.Health.Status}}' $Container 2>$null
-        if ($Status -eq "healthy") {
-            Write-Host " ✔" -ForegroundColor Green
-            $Ready = $true
-            break
+    $MaxWait  = 120
+    $Interval = 3
+
+    foreach ($Container in $Services.Keys) {
+        $Name    = $Services[$Container]
+        $Elapsed = 0
+        $Ready   = $false
+
+        Write-Host "  Esperando $Name" -NoNewline -ForegroundColor White
+
+        while ($Elapsed -lt $MaxWait) {
+            $Status = docker inspect --format='{{.State.Health.Status}}' $Container 2>$null
+            if ($Status -eq "healthy") {
+                Write-Host " ✔" -ForegroundColor Green
+                $Ready = $true
+                break
+            }
+            Write-Host "." -NoNewline -ForegroundColor DarkGray
+            Start-Sleep -Seconds $Interval
+            $Elapsed += $Interval
         }
-        Write-Host "." -NoNewline -ForegroundColor DarkGray
-        Start-Sleep -Seconds $Interval
-        $Elapsed += $Interval
-    }
 
-    if (-not $Ready) {
-        Write-Host " ⚠" -ForegroundColor Yellow
-        Write-Warn "$Name tardó más de ${MaxWait}s. Puede que aún esté iniciando."
-        Write-Warn "Verifica con: docker compose ps"
+        if (-not $Ready) {
+            Write-Host " ⚠" -ForegroundColor Yellow
+            Write-Warn "$Name tardó más de ${MaxWait}s. Puede que aún esté iniciando."
+            Write-Warn "Verifica con: docker compose -f $ComposeInfra ps"
+        }
     }
 }
 
-# ── 6. Resumen de puertos ─────────────────────────────────────────────────────
+# ── 6. Resumen de servicios activos ───────────────────────────────────────────
 Write-Host ""
-Write-Host "  ┌──────────────────────────────────────────┐" -ForegroundColor Blue
-Write-Host "  │  Servicios activos                       │" -ForegroundColor Blue
-Write-Host "  ├──────────────────┬───────────────────────┤" -ForegroundColor Blue
-Write-Host "  │  SQL Server 2022 │  localhost:1433        │" -ForegroundColor Blue
-Write-Host "  │  PostgreSQL 16   │  localhost:5432        │" -ForegroundColor Blue
-Write-Host "  │  MongoDB 7       │  localhost:27017       │" -ForegroundColor Blue
-Write-Host "  └──────────────────┴───────────────────────┘" -ForegroundColor Blue
+Write-Host "  ┌────────────────────────────────────────────────────┐" -ForegroundColor Blue
+Write-Host "  │  Servicios activos (modo: $Mode)" -ForegroundColor Blue
+Write-Host "  ├──────────────────────┬─────────────────────────────┤" -ForegroundColor Blue
+
+if ($Mode -in @("Infra", "All")) {
+    Write-Host "  │  SQL Server 2022      │  localhost:1433             │" -ForegroundColor Blue
+    Write-Host "  │  PostgreSQL 16        │  localhost:5432             │" -ForegroundColor Blue
+    Write-Host "  │  MongoDB 7            │  localhost:27017            │" -ForegroundColor Blue
+}
+if ($Mode -in @("Apps", "All")) {
+    Write-Host "  │  .NET App             │  localhost:5001             │" -ForegroundColor Blue
+    Write-Host "  │  Node API             │  localhost:5000             │" -ForegroundColor Blue
+    Write-Host "  │  Search Service       │  localhost:3001             │" -ForegroundColor Blue
+}
+if ($Mode -in @("Portal", "All")) {
+    Write-Host "  │  PHP Portal           │  localhost:8080             │" -ForegroundColor Blue
+}
+
+Write-Host "  └──────────────────────┴─────────────────────────────┘" -ForegroundColor Blue
 Write-Host ""
 
-# ── 7. Abrir Visual Studio ────────────────────────────────────────────────────
-if (-not $SkipVS) {
+# ── 7. Abrir Visual Studio (solo en modo All, a menos que -OpenVS se indique) ─
+$ShouldOpenVS = ($Mode -eq "All") -and (-not $SkipVS)
+
+if ($ShouldOpenVS) {
     Write-Step "Abriendo proyecto en Visual Studio..."
 
     $CsprojPath = Resolve-Path "QualityDocD\QualityDocD.csproj" -ErrorAction SilentlyContinue
@@ -152,7 +173,6 @@ if (-not $SkipVS) {
         Write-Warn "No se encontró QualityDocD\QualityDocD.csproj."
         Write-Warn "Ábrelo manualmente desde Visual Studio."
     } else {
-        # Buscar devenv.exe en las ubicaciones comunes de VS 2019, 2022
         $VsPaths = @(
             "${env:ProgramFiles}\Microsoft Visual Studio\2022\Community\Common7\IDE\devenv.exe",
             "${env:ProgramFiles}\Microsoft Visual Studio\2022\Professional\Common7\IDE\devenv.exe",
@@ -164,12 +184,10 @@ if (-not $SkipVS) {
         $DevEnv = $VsPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
 
         if ($DevEnv) {
-            Write-OK "Visual Studio encontrado en:"
-            Write-Host "    $DevEnv" -ForegroundColor DarkGray
+            Write-OK "Visual Studio encontrado."
             Start-Process $DevEnv -ArgumentList "`"$CsprojPath`""
             Write-OK "Visual Studio abriendo QualityDocD.csproj..."
         } else {
-            # Fallback: usar el comando 'start' de Windows (abre VS según la asociación de .csproj)
             Write-Warn "No se encontró devenv.exe. Intentando abrir con el programa predeterminado..."
             Start-Process $CsprojPath
         }
@@ -178,24 +196,30 @@ if (-not $SkipVS) {
 
 # ── 8. Mensaje final ──────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "  ══════════════════════════════════════════" -ForegroundColor Green
-Write-Host "   ¡Todo listo! Presiona F5 en Visual Studio" -ForegroundColor Green
-Write-Host "   Las migraciones se aplican automáticamente" -ForegroundColor Green
-Write-Host "   al arrancar la app por primera vez."        -ForegroundColor Green
+Write-Host "  ══════════════════════════════════════════════════════" -ForegroundColor Green
+Write-Host "   ¡Todo listo!" -ForegroundColor Green
 Write-Host ""
 Write-Host "   Usuarios de prueba:" -ForegroundColor Green
 Write-Host "     admin    / Admin123!"    -ForegroundColor White
 Write-Host "     gerente  / Gerente123!"  -ForegroundColor White
-Write-Host "     revisor  / Revisor123!"  -ForegroundColor White
-Write-Host "     operario / Operario123!" -ForegroundColor White
-Write-Host "  ══════════════════════════════════════════" -ForegroundColor Green
+Write-Host "     revisor1 / Revisor123!"  -ForegroundColor White
+Write-Host "     editor   / Editor123!"   -ForegroundColor White
+Write-Host "  ══════════════════════════════════════════════════════" -ForegroundColor Green
 Write-Host ""
 
 # ── Comandos de ayuda ─────────────────────────────────────────────────────────
-Write-Host "  Comandos útiles:" -ForegroundColor DarkGray
-Write-Host "    docker compose ps            # Ver estado de los contenedores" -ForegroundColor DarkGray
-Write-Host "    docker compose logs -f       # Ver logs en tiempo real"         -ForegroundColor DarkGray
-Write-Host "    docker compose down          # Detener (conserva los datos)"    -ForegroundColor DarkGray
-Write-Host "    .\setup.ps1 -ResetData       # Borrar datos y empezar de cero"  -ForegroundColor DarkGray
-Write-Host "    .\setup.ps1 -SkipVS          # Iniciar sin abrir Visual Studio" -ForegroundColor DarkGray
+Write-Host "  Comandos útiles por composer:" -ForegroundColor DarkGray
+Write-Host "    docker compose -f docker-compose.infra.yml  ps      # Estado BD"        -ForegroundColor DarkGray
+Write-Host "    docker compose -f docker-compose.apps.yml   ps      # Estado backend"   -ForegroundColor DarkGray
+Write-Host "    docker compose -f docker-compose.portal.yml ps      # Estado portal"    -ForegroundColor DarkGray
 Write-Host ""
+Write-Host "    docker compose -f docker-compose.infra.yml  logs -f # Logs BD"          -ForegroundColor DarkGray
+Write-Host "    docker compose -f docker-compose.apps.yml   logs -f # Logs backend"     -ForegroundColor DarkGray
+Write-Host "    docker compose -f docker-compose.portal.yml logs -f # Logs portal"      -ForegroundColor DarkGray
+Write-Host ""
+Write-Host "    .\setup.ps1 -Mode Infra    # Solo bases de datos"    -ForegroundColor DarkGray
+Write-Host "    .\setup.ps1 -Mode Apps     # Solo backend"           -ForegroundColor DarkGray
+Write-Host "    .\setup.ps1 -Mode Portal   # Solo PHP portal"        -ForegroundColor DarkGray
+Write-Host "    .\setup.ps1 -ResetData     # Borrar datos y reiniciar" -ForegroundColor DarkGray
+Write-Host ""
+

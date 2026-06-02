@@ -44,7 +44,8 @@ router.post("/search/index", requireAuth, async (req, res): Promise<void> => {
     .delete(searchIndexTable)
     .where(eq(searchIndexTable.versionId, parsed.data.versionId));
 
-  await db.insert(searchIndexTable).values({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (db.insert(searchIndexTable) as any).values({
     documentId: version.documentId,
     versionId: version.id,
     companyId,

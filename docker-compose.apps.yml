@@ -1,0 +1,64 @@
+
+services:
+
+  # ── Node.js Search Service ────────────────────────────────────────────────────
+  search-service:
+    build:
+      context: ./search-service
+      dockerfile: Dockerfile
+    container_name: qualitydoc_search
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    environment:
+      PORT:           "3001"
+      MONGO_HOST:     "mongodb"
+      MONGO_USER:     "${MONGO_USER:-mongoadmin}"
+      MONGO_PASSWORD: "${MONGO_PASSWORD:-QualityDoc_Mongo_2026!}"
+      MONGO_DB:       "${MONGO_DB:-qualitydoc_meta}"
+    ports:
+      - "3001:3001"
+
+  # ── Aplicación .NET ───────────────────────────────────────────────────────────
+  qualitydoc-app:
+    build:
+      context: ./QualityDocD
+      dockerfile: Dockerfile
+    container_name: qualitydoc_app
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    ports:
+      - "5001:5000"
+    environment:
+      ConnectionStrings__SqlServer:  "Server=sqlserver,1433;Database=QualityDocDB;User Id=sa;Password=${SQLSERVER_SA_PASSWORD:-QualityDoc2026!};TrustServerCertificate=True;"
+      ConnectionStrings__PostgreSQL: "Host=postgres;Port=5432;Database=${PG_DB:-qualitydoc_audit};Username=${PG_USER:-qualitydoc};Password=${PG_PASSWORD:-QualityDoc_PG_2026!};"
+      MongoDB__Uri:                  "mongodb://${MONGO_USER:-mongoadmin}:${MONGO_PASSWORD:-QualityDoc_Mongo_2026!}@mongodb:27017"
+      MongoDB__Database:             "${MONGO_DB:-qualitydoc_meta}"
+      SearchService__BaseUrl:        "http://search-service:3001"
+      NodeApi__Url:                  "http://node-api:5000"
+      ApiAuth__JwtSecret:            "${SESSION_SECRET:-QualityDoc-JWT-Secret-Change-Me!}"
+      ApiAuth__ExpirationHours:      "8"
+      ASPNETCORE_URLS:               "http://+:5000"
+
+  # ── Node.js API ───────────────────────────────────────────────────────────────
+  node-api:
+    build:
+      context: ./node-api
+      dockerfile: Dockerfile
+    container_name: qualitydoc_node_api
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL:   "${NODE_API_DATABASE_URL:-postgresql://qualitydoc:QualityDoc_PG_2026!@postgres:5432/qualitydoc_audit}"
+      SESSION_SECRET: "${SESSION_SECRET:-QualityDoc-JWT-Secret-Change-Me!}"
+      NODE_API_PORT:  "5000"
+
+# ── Red compartida (creada por docker-compose.infra.yml) ──────────────────────
+networks:
+  qualitydoc_net:
+    name: qualitydoc_net
+    external: true

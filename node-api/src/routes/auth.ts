@@ -67,7 +67,8 @@ router.post("/auth/validate", async (req, res): Promise<void> => {
     return;
   }
 
-const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-secret";  try {
+  const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-secret";
+  try {
     const jwt = await import("jsonwebtoken");
     const payload = jwt.default.verify(parsed.data.token, SESSION_SECRET) as {
       userId: number;
@@ -94,12 +95,25 @@ router.post("/users", async (req, res): Promise<void> => {
     return;
   }
 
-  const { password, ...rest } = parsed.data;
-  const passwordHash = await bcrypt.hash(password, 10);
+  const data = parsed.data as {
+    companyId: number;
+    name: string;
+    email: string;
+    password: string;
+    role?: "admin" | "editor" | "viewer";
+  };
 
-  const [user] = await db
-    .insert(usersTable)
-    .values({ ...rest, passwordHash })
+  const passwordHash = await bcrypt.hash(data.password, 10);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [user] = await (db.insert(usersTable) as any)
+    .values({
+      companyId: data.companyId,
+      name: data.name,
+      email: data.email,
+      passwordHash,
+      role: data.role,
+    })
     .returning();
 
   res.status(201).json({

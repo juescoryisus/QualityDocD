@@ -46,6 +46,7 @@ public class AuditEntry
     public int Id { get; set; }
     public int DocumentId { get; set; }
     public string DocumentCode { get; set; } = string.Empty;
+    public string? DocumentTitle { get; set; }
     public int? UserId { get; set; }
     public string? Username { get; set; }
     public string Action { get; set; } = string.Empty;

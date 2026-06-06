@@ -12,8 +12,8 @@ using QualityDocD.Data;
 namespace QualityDocD.Migrations.SqlServer
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260603155318_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260606202353_InitialSqlServer")]
+    partial class InitialSqlServer
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

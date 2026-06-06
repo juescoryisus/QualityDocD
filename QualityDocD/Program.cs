@@ -6,17 +6,19 @@ using QualityDocD.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ── MVC ──────────────────────────────────────────────────────────────────────
+// ── MVC ───────────────────────────────────────────────────────────────────────
 builder.Services.AddControllersWithViews();
 
-// ── Bases de Datos ───────────────────────────────────────────────────────────
+// ── Bases de datos (ambas en PostgreSQL) ──────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(opts =>
-    opts.UseSqlServer(builder.Configuration.GetConnectionString("SqlServer"),
-    sql => sql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null)));
+    opts.UseNpgsql(
+        builder.Configuration.GetConnectionString("MainDb"),
+        npg => npg.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null)));
 
 builder.Services.AddDbContext<AuditDbContext>(opts =>
-    opts.UseNpgsql(builder.Configuration.GetConnectionString("PostgreSQL"),
-    npg => npg.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null)));
+    opts.UseNpgsql(
+        builder.Configuration.GetConnectionString("AuditDb"),
+        npg => npg.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null)));
 
 // ── Servicios y HTTP Clients ──────────────────────────────────────────────────
 builder.Services.AddScoped<AuthService>();
@@ -26,7 +28,8 @@ builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddHttpClient("SearchService", client =>
 {
-    client.BaseAddress = new Uri(builder.Configuration["SearchService:BaseUrl"] ?? "http://localhost:3001");
+    // Ahora usa la ruta del proxy en lugar del puerto directo
+    client.BaseAddress = new Uri("http://localhost:5001/search/");
     client.Timeout = TimeSpan.FromSeconds(5);
 });
 
@@ -45,42 +48,47 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
 
 builder.Services.AddAuthorization();
 
+// ── YARP — Proxy inverso ──────────────────────────────────────────────────────
+builder.Services.AddReverseProxy()
+    .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
+
+// ── Build ─────────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
-// ── Migraciones y Seed de datos ───────────────────────────────────────────────
+// ── Migraciones automáticas y seed de datos ───────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
     var log = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    // SQL Server — aplica migraciones automáticamente + seed inicial
+    // PostgreSQL principal — migraciones + seed de usuarios
     try
     {
-        var sqlCtx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        sqlCtx.Database.Migrate(); // ← reemplaza EnsureCreated()
+        var mainCtx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        mainCtx.Database.Migrate();
 
-        if (!sqlCtx.Users.Any())
+        if (!mainCtx.Users.Any())
         {
             var now = DateTime.UtcNow;
-            sqlCtx.Users.AddRange(
+            mainCtx.Users.AddRange(
                 new User { Username = "admin", Email = "admin@qualitydoc.local", PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin123!"), Role = "Admin", Department = "TI", IsActive = true, CreatedAt = now },
                 new User { Username = "gerente", Email = "gerente@qualitydoc.local", PasswordHash = BCrypt.Net.BCrypt.HashPassword("Gerente123!"), Role = "Manager", Department = "Calidad", IsActive = true, CreatedAt = now },
                 new User { Username = "revisor", Email = "revisor@qualitydoc.local", PasswordHash = BCrypt.Net.BCrypt.HashPassword("Revisor123!"), Role = "Reviewer", Department = "Operaciones", IsActive = true, CreatedAt = now },
                 new User { Username = "operario", Email = "operario@qualitydoc.local", PasswordHash = BCrypt.Net.BCrypt.HashPassword("Operario123!"), Role = "Viewer", Department = "Producción", IsActive = true, CreatedAt = now }
             );
-            sqlCtx.SaveChanges();
-            log.LogInformation("SQL Server: usuarios semilla insertados.");
+            mainCtx.SaveChanges();
+            log.LogInformation("PostgreSQL main: usuarios semilla insertados.");
         }
     }
-    catch (Exception ex) { log.LogWarning("SQL Server no disponible: {Message}", ex.Message); }
+    catch (Exception ex) { log.LogWarning("PostgreSQL main no disponible: {Message}", ex.Message); }
 
-    // PostgreSQL — aplica migraciones automáticamente
+    // PostgreSQL auditoría — migraciones
     try
     {
-        var pgCtx = scope.ServiceProvider.GetRequiredService<AuditDbContext>();
-        pgCtx.Database.Migrate(); // ← reemplaza EnsureCreated()
-        log.LogInformation("PostgreSQL: migraciones aplicadas correctamente.");
+        var auditCtx = scope.ServiceProvider.GetRequiredService<AuditDbContext>();
+        auditCtx.Database.Migrate();
+        log.LogInformation("PostgreSQL audit: migraciones aplicadas correctamente.");
     }
-    catch (Exception ex) { log.LogWarning("PostgreSQL no disponible: {Message}", ex.Message); }
+    catch (Exception ex) { log.LogWarning("PostgreSQL audit no disponible: {Message}", ex.Message); }
 }
 
 // ── Pipeline HTTP ─────────────────────────────────────────────────────────────
@@ -88,7 +96,7 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
     app.UseHsts();
-    app.UseHttpsRedirection(); // ← solo en producción (Docker/reverse proxy maneja HTTPS en dev)
+    app.UseHttpsRedirection();
 }
 
 app.UseStaticFiles();
@@ -96,7 +104,16 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllerRoute(name: "default", pattern: "{controller=Home}/{action=Index}/{id?}");
+// ── Rutas MVC ─────────────────────────────────────────────────────────────────
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=Home}/{action=Index}/{id?}");
+
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTime.UtcNow }));
+
+// ── YARP — debe ir al final, después de MapControllerRoute ───────────────────
+// Captura /node-api/... → reenvía a localhost:8080
+// Captura /search/...   → reenvía a localhost:3001
+app.MapReverseProxy();
 
 app.Run();

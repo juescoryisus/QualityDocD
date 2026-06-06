@@ -4,10 +4,10 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace QualityDocD.Migrations.PostgreSQL
+namespace QualityDocD.Migrations.AuditDb
 {
     /// <inheritdoc />
-    public partial class InitialCreate : Migration
+    public partial class InitialAuditPostgres : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)

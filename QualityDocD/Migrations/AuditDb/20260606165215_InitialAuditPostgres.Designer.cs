@@ -9,11 +9,11 @@ using QualityDocD.Data;
 
 #nullable disable
 
-namespace QualityDocD.Migrations.PostgreSQL
+namespace QualityDocD.Migrations.AuditDb
 {
     [DbContext(typeof(AuditDbContext))]
-    [Migration("20260603155402_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260606165215_InitialAuditPostgres")]
+    partial class InitialAuditPostgres
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)

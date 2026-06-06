@@ -8,7 +8,7 @@ using QualityDocD.Data;
 
 #nullable disable
 
-namespace QualityDocD.Migrations.PostgreSQL
+namespace QualityDocD.Migrations.AuditDb
 {
     [DbContext(typeof(AuditDbContext))]
     partial class AuditDbContextModelSnapshot : ModelSnapshot

@@ -7,9 +7,19 @@ require_once 'config.php';
 
 startPortalSession();
 
+startPortalSession();
+
+// Manejar cierre de sesión
+if (isset($_GET['logout'])) {
+    clearSessionUser();
+    session_destroy();
+    header('Location: login.php');
+    exit;
+}
+
 // Si ya está logueado, redirigir
 if (getSessionUser() !== null) {
-    header('Location: index.php');
+    header('Location: dashboard.php');
     exit;
 }
 
@@ -26,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (isset($result['token']) && isset($result['user'])) {
             setSessionUser($result['user'], $result['token']);
-            header('Location: index.php');
+            header('Location: dashboard.php');
             exit;
         } elseif (isset($result['error'])) {
             $error = $result['error'];

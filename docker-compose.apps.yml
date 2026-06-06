@@ -62,3 +62,22 @@ networks:
   qualitydoc_net:
     name: qualitydoc_net
     external: true
+
+
+  # ── Portal PHP ────────────────────────────────────────────────────────────────
+  php-portal:
+    build:
+      context: ./php-portal
+      dockerfile: Dockerfile
+    container_name: qualitydoc_php
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    ports:
+      - "8080:80"
+    environment:
+      PG_USER:     "${PG_USER:-qualitydoc}"
+      PG_PASSWORD: "${PG_PASSWORD:-QualityDoc_PG_2026!}"
+    depends_on:
+      - qualitydoc-app
+      - search-service

@@ -3,14 +3,13 @@ using Microsoft.EntityFrameworkCore;
 using QualityDocD.Data;
 using QualityDocD.Models.Domain;
 using QualityDocD.Services;
-using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ── MVC ──────────────────────────────────────────────────────────────────────
 builder.Services.AddControllersWithViews();
 
-// ── Bases de Datos ──────────────────────────────────────────────────────────
+// ── Bases de Datos ───────────────────────────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(opts =>
     opts.UseSqlServer(builder.Configuration.GetConnectionString("SqlServer"),
     sql => sql.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null)));
@@ -19,12 +18,11 @@ builder.Services.AddDbContext<AuditDbContext>(opts =>
     opts.UseNpgsql(builder.Configuration.GetConnectionString("PostgreSQL"),
     npg => npg.EnableRetryOnFailure(5, TimeSpan.FromSeconds(10), null)));
 
-// ── Servicios y HTTP Clients ─────────────────────────────────────────────────
+// ── Servicios y HTTP Clients ──────────────────────────────────────────────────
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DocumentService>();
 builder.Services.AddScoped<ApiTokenService>();
 builder.Services.AddHttpContextAccessor();
-
 
 builder.Services.AddHttpClient("SearchService", client =>
 {
@@ -34,7 +32,7 @@ builder.Services.AddHttpClient("SearchService", client =>
 
 builder.Services.AddHttpClient<NodeApiAuthService>();
 
-// ── Autenticación y Autorización ─────────────────────────────────────────────
+// ── Autenticación y Autorización ──────────────────────────────────────────────
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(opts =>
     {
@@ -49,16 +47,16 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-// ── Inicialización (Seed de datos) ───────────────────────────────────────────
+// ── Migraciones y Seed de datos ───────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
     var log = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-    // SQL Server Seed
+    // SQL Server — aplica migraciones automáticamente + seed inicial
     try
     {
         var sqlCtx = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        sqlCtx.Database.EnsureCreated();
+        sqlCtx.Database.Migrate(); // ← reemplaza EnsureCreated()
 
         if (!sqlCtx.Users.Any())
         {
@@ -75,30 +73,24 @@ using (var scope = app.Services.CreateScope())
     }
     catch (Exception ex) { log.LogWarning("SQL Server no disponible: {Message}", ex.Message); }
 
-    // Postgres Check
+    // PostgreSQL — aplica migraciones automáticamente
     try
     {
         var pgCtx = scope.ServiceProvider.GetRequiredService<AuditDbContext>();
-        pgCtx.Database.EnsureCreated();
-        log.LogInformation("PostgreSQL: tablas verificadas/creadas.");
+        pgCtx.Database.Migrate(); // ← reemplaza EnsureCreated()
+        log.LogInformation("PostgreSQL: migraciones aplicadas correctamente.");
     }
     catch (Exception ex) { log.LogWarning("PostgreSQL no disponible: {Message}", ex.Message); }
 }
 
-// ── Pipeline HTTP ────────────────────────────────────────────────────────────
+// ── Pipeline HTTP ─────────────────────────────────────────────────────────────
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Home/Error");
     app.UseHsts();
+    app.UseHttpsRedirection(); // ← solo en producción (Docker/reverse proxy maneja HTTPS en dev)
 }
 
-// ✅ Solo en producción (o eliminarlo si usas un proxy/Docker que maneja HTTPS)
-if (!app.Environment.IsDevelopment())
-{
-    app.UseExceptionHandler("/Home/Error");
-    app.UseHsts();
-    app.UseHttpsRedirection(); // ← muévelo aquí dentro
-}
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();

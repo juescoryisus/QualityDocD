@@ -1,5 +1,13 @@
 ﻿<?php
+// =============================================================================
+// QualityDoc Portal — Auditoría (con sidebar compartida)
+// =============================================================================
 require_once 'config.php';
+requireLogin();
+
+$user  = getSessionUser();
+$token = getSessionToken();
+$role  = $user['role'] ?? 'Viewer';
 
 $page     = max(1, (int)($_GET['page'] ?? 1));
 $pageSize = 15;
@@ -13,22 +21,21 @@ $total      = 0;
 $actions    = [];
 $compliance = [];
 $error      = null;
+$pgOk       = false;
 
-// Detecta el nombre real de una columna (soporta snake_case y PascalCase)
 function resolveCol(PDO $pdo, string $table, array $candidates): string {
     $stmt = $pdo->prepare(
         "SELECT column_name FROM information_schema.columns
          WHERE table_name = ? AND column_name = ANY(?)"
     );
     $stmt->execute([$table, '{' . implode(',', $candidates) . '}']);
-    $found = $stmt->fetchColumn();
-    return $found ?: $candidates[0];
+    return $stmt->fetchColumn() ?: $candidates[0];
 }
 
 try {
-    $pdo = getPgConnection();
+    $pdo   = getPgConnection();
+    $pgOk  = true;
 
-    // Detecta nombres de columnas reales
     $cAction   = resolveCol($pdo, 'audit_entries', ['action',        'Action']);
     $cDocId    = resolveCol($pdo, 'audit_entries', ['document_id',   'DocumentId']);
     $cDocCode  = resolveCol($pdo, 'audit_entries', ['document_code', 'DocumentCode']);
@@ -39,45 +46,27 @@ try {
     $cIp       = resolveCol($pdo, 'audit_entries', ['ip_address',    'IpAddress']);
     $cCreated  = resolveCol($pdo, 'audit_entries', ['created_at',    'CreatedAt']);
 
-    // Acciones disponibles para filtro
     $actions = $pdo
         ->query("SELECT DISTINCT \"{$cAction}\" FROM audit_entries ORDER BY \"{$cAction}\"")
         ->fetchAll(PDO::FETCH_COLUMN);
 
-    // Filtros dinámicos
     $where  = [];
     $params = [];
+    if ($filterAction !== '') { $where[] = "\"{$cAction}\" = :action"; $params[':action'] = $filterAction; }
+    if ($filterUser   !== '') { $where[] = "\"{$cUsername}\" ILIKE :user"; $params[':user'] = '%'.$filterUser.'%'; }
+    $whereSQL = $where ? 'WHERE '.implode(' AND ', $where) : '';
 
-    if ($filterAction !== '') {
-        $where[]           = "\"{$cAction}\" = :action";
-        $params[':action'] = $filterAction;
-    }
-    if ($filterUser !== '') {
-        $where[]        = "\"{$cUsername}\" ILIKE :user";
-        $params[':user'] = '%' . $filterUser . '%';
-    }
-
-    $whereSQL = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-
-    // Total con filtros
     $stmtCount = $pdo->prepare("SELECT COUNT(*) FROM audit_entries $whereSQL");
     $stmtCount->execute($params);
-    $total = (int) $stmtCount->fetchColumn();
+    $total = (int)$stmtCount->fetchColumn();
 
-    // Logs paginados
     $stmtLogs = $pdo->prepare(
-        "SELECT \"{$cAction}\"   AS action,
-                \"{$cDocCode}\"  AS document_code,
-                \"{$cDocTitle}\" AS document_title,
-                \"{$cUsername}\" AS username,
-                \"{$cOldVal}\"   AS old_value,
-                \"{$cNewVal}\"   AS new_value,
-                \"{$cIp}\"       AS ip_address,
-                \"{$cCreated}\"  AS created_at
-         FROM audit_entries
-         $whereSQL
-         ORDER BY \"{$cCreated}\" DESC
-         LIMIT :limit OFFSET :offset"
+        "SELECT \"{$cAction}\" AS action, \"{$cDocCode}\" AS document_code,
+                \"{$cDocTitle}\" AS document_title, \"{$cUsername}\" AS username,
+                \"{$cOldVal}\" AS old_value, \"{$cNewVal}\" AS new_value,
+                \"{$cIp}\" AS ip_address, \"{$cCreated}\" AS created_at
+         FROM audit_entries $whereSQL
+         ORDER BY \"{$cCreated}\" DESC LIMIT :limit OFFSET :offset"
     );
     foreach ($params as $k => $v) $stmtLogs->bindValue($k, $v);
     $stmtLogs->bindValue(':limit',  $pageSize, PDO::PARAM_INT);
@@ -85,16 +74,11 @@ try {
     $stmtLogs->execute();
     $logs = $stmtLogs->fetchAll();
 
-    // Resumen por tipo de acción
-    $compliance = $pdo
-        ->query("SELECT \"{$cAction}\" AS action,
-                        COUNT(*) AS total,
-                        COUNT(DISTINCT \"{$cDocId}\") AS docs,
-                        MAX(\"{$cCreated}\") AS last_event
-                 FROM audit_entries
-                 GROUP BY \"{$cAction}\"
-                 ORDER BY total DESC")
-        ->fetchAll();
+    $compliance = $pdo->query(
+        "SELECT \"{$cAction}\" AS action, COUNT(*) AS total,
+                COUNT(DISTINCT \"{$cDocId}\") AS docs, MAX(\"{$cCreated}\") AS last_event
+         FROM audit_entries GROUP BY \"{$cAction}\" ORDER BY total DESC"
+    )->fetchAll();
 
 } catch (Exception $e) {
     $error = $e->getMessage();
@@ -103,96 +87,99 @@ try {
 $totalPages = $total > 0 ? ceil($total / $pageSize) : 1;
 
 function buildPageUrl(int $p, string $action, string $user): string {
-    $params = array_filter(['page' => $p, 'action' => $action, 'user' => $user]);
-    return 'audit.php?' . http_build_query($params);
+    return 'audit.php?' . http_build_query(array_filter(['page'=>$p,'action'=>$action,'user'=>$user]));
 }
+
+$currentPage = 'audit';
 ?>
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-bs-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Registro de Auditoría — <?= APP_NAME ?></title>
+    <title>Auditoría — <?= APP_NAME ?></title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <style>
-        body { background: #f0f2f5; }
-        .navbar-brand { font-weight: 700; letter-spacing: -.5px; }
-        .card { border: none; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
-        .table th { font-size: .78rem; text-transform: uppercase;
-                    letter-spacing: .04em; color: #6c757d; }
-        .table td { font-size: .85rem; vertical-align: middle; }
+        :root { --sidebar-w:260px; --topbar-h:56px; --bg-sidebar:#0f1117; --bg-main:#13151a; --accent:#4f8ef7; }
+        body { margin:0; background:var(--bg-main); font-family:'Segoe UI',system-ui,sans-serif; }
+        #sidebar { position:fixed; top:0; left:0; bottom:0; width:var(--sidebar-w); background:var(--bg-sidebar); border-right:1px solid rgba(255,255,255,.07); display:flex; flex-direction:column; z-index:200; transition:transform .25s; }
+        .sidebar-brand { display:flex; align-items:center; gap:10px; padding:18px 20px 16px; border-bottom:1px solid rgba(255,255,255,.07); }
+        .brand-icon { width:36px; height:36px; border-radius:8px; background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:1.1rem; color:#fff; }
+        .brand-name { font-weight:700; font-size:.95rem; color:#e8eaf0; }
+        .brand-sub  { font-size:.72rem; color:#6b7280; }
+        .sidebar-user { display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.07); }
+        .user-avatar { width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,#4f8ef7,#7c3aed); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.85rem; color:#fff; flex-shrink:0; }
+        .user-name { font-size:.82rem; font-weight:600; color:#e0e2ea; }
+        .user-role { font-size:.7rem; color:#6b7280; }
+        .sidebar-section { padding:14px 12px 4px; font-size:.66rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#4b5563; }
+        .nav-item-link { display:flex; align-items:center; gap:11px; padding:9px 14px; margin:1px 8px; border-radius:8px; text-decoration:none; color:#9ca3af; font-size:.85rem; font-weight:500; transition:background .15s,color .15s; }
+        .nav-item-link:hover  { background:rgba(79,142,247,.12); color:#c8d4f5; }
+        .nav-item-link.active { background:rgba(79,142,247,.18); color:var(--accent); }
+        .nav-item-link i { font-size:1rem; width:18px; text-align:center; }
+        .sidebar-services { padding:0 12px 8px; }
+        .service-badge { display:flex; align-items:center; gap:8px; padding:7px 10px; margin-bottom:2px; border-radius:8px; text-decoration:none; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); font-size:.78rem; color:#9ca3af; transition:background .15s,color .15s; }
+        .service-badge:hover { background:rgba(255,255,255,.07); color:#d1d5db; }
+        .service-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+        .dot-ok  { background:#22c55e; } .dot-off { background:#6b7280; }
+        .sidebar-footer { margin-top:auto; padding:14px 12px; border-top:1px solid rgba(255,255,255,.07); }
+        #topbar { position:fixed; top:0; left:var(--sidebar-w); right:0; height:var(--topbar-h); background:var(--bg-sidebar); border-bottom:1px solid rgba(255,255,255,.07); display:flex; align-items:center; padding:0 24px; z-index:100; gap:12px; }
+        .page-title { font-size:1rem; font-weight:600; color:#e0e2ea; }
+        #main { margin-left:var(--sidebar-w); margin-top:var(--topbar-h); padding:28px 28px 40px; min-height:calc(100vh - var(--topbar-h)); }
+        .hub-card { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden; }
+        .hub-card-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.07); display:flex; align-items:center; gap:8px; font-size:.85rem; font-weight:600; color:#c8d0e0; }
+        @media(max-width:768px){ #sidebar{transform:translateX(-100%);} #sidebar.open{transform:translateX(0);} #topbar,#main{left:0;margin-left:0;} }
     </style>
 </head>
 <body>
+<?php require_once '_sidebar.php'; ?>
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-primary shadow-sm">
-    <div class="container">
-        <a class="navbar-brand" href="index.php">
-            <i class="bi bi-file-earmark-check2 me-2"></i><?= APP_NAME ?>
-        </a>
-        <div class="navbar-nav ms-auto">
-            <a class="nav-link" href="index.php">
-                <i class="bi bi-speedometer2 me-1"></i>Panel
-            </a>
-            <a class="nav-link" href="documents.php">
-                <i class="bi bi-files me-1"></i>Documentos
-            </a>
-            <a class="nav-link active" href="audit.php">
-                <i class="bi bi-journal-text me-1"></i>Auditoría
-            </a>
-        </div>
-    </div>
-</nav>
-
-<div class="container py-4">
+<main id="main">
 
     <div class="mb-4">
-        <h4 class="fw-bold mb-1">Registro de Auditoría</h4>
-        <p class="text-muted mb-0">
-            Datos leídos directamente desde <strong>PostgreSQL</strong>
-            <code>(qualitydoc_audit)</code>
-        </p>
+        <h5 class="fw-bold text-white mb-1">Registro de Auditoría</h5>
+        <p class="text-muted small mb-0">Datos en tiempo real desde <strong>PostgreSQL</strong> <code>(qualitydoc_audit)</code></p>
     </div>
 
     <?php if ($error): ?>
-    <div class="alert alert-danger">
+    <div class="alert alert-danger border-0" style="background:rgba(239,68,68,.1);color:#fca5a5;">
         <i class="bi bi-x-circle me-2"></i>
         Error de conexión a PostgreSQL: <code><?= htmlspecialchars($error) ?></code>
         <br><small>Verifica que el contenedor <code>qualitydoc_postgres</code> esté corriendo.</small>
     </div>
     <?php else: ?>
 
-    <!-- Resumen de cumplimiento -->
+    <!-- Resumen por tipo -->
     <?php if (!empty($compliance)): ?>
-    <div class="card mb-4">
-        <div class="card-header bg-white border-bottom fw-semibold">
-            <i class="bi bi-clipboard-data me-2 text-primary"></i>
-            Resumen por Tipo de Evento
+    <div class="hub-card mb-4">
+        <div class="hub-card-header">
+            <i class="bi bi-clipboard-data" style="color:#8b5cf6"></i> Resumen por Tipo de Evento
         </div>
         <div class="table-responsive">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>Acción</th>
-                        <th class="text-center">Total Eventos</th>
-                        <th class="text-center">Documentos Únicos</th>
-                        <th>Último Evento</th>
+            <table class="table mb-0" style="font-size:.82rem;">
+                <thead style="background:rgba(255,255,255,.03);">
+                    <tr style="color:#6b7280;">
+                        <th class="px-4 py-3 fw-semibold">Acción</th>
+                        <th class="py-3 text-center fw-semibold">Total</th>
+                        <th class="py-3 text-center fw-semibold">Documentos</th>
+                        <th class="py-3 fw-semibold">Último Evento</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($compliance as $row): ?>
-                    <tr>
-                        <td>
-                            <span class="fw-semibold"><?= htmlspecialchars($row['action']) ?></span>
+                    <?php
+                    $colors = ['#4f8ef7','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6'];
+                    foreach ($compliance as $i => $row):
+                        $c = $colors[$i % count($colors)];
+                    ?>
+                    <tr style="border-color:rgba(255,255,255,.05);">
+                        <td class="px-4 py-2">
+                            <span class="fw-semibold" style="color:#e0e2ea;"><?= htmlspecialchars($row['action']) ?></span>
                         </td>
-                        <td class="text-center">
-                            <span class="badge bg-primary rounded-pill"><?= $row['total'] ?></span>
+                        <td class="py-2 text-center">
+                            <span class="badge rounded-pill" style="background:<?= $c ?>22;color:<?= $c ?>;font-size:.75rem;"><?= $row['total'] ?></span>
                         </td>
-                        <td class="text-center text-muted"><?= $row['docs'] ?></td>
-                        <td class="text-muted small">
-                            <?= date('d/m/Y H:i', strtotime($row['last_event'])) ?>
-                        </td>
+                        <td class="py-2 text-center" style="color:#9ca3af;"><?= $row['docs'] ?></td>
+                        <td class="py-2 small" style="color:#6b7280;"><?= date('d/m/Y H:i', strtotime($row['last_event'])) ?></td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -202,26 +189,27 @@ function buildPageUrl(int $p, string $action, string $user): string {
     <?php endif; ?>
 
     <!-- Filtros -->
-    <div class="card mb-4">
-        <div class="card-body py-3">
+    <div class="hub-card mb-4">
+        <div class="hub-card-header">
+            <i class="bi bi-funnel" style="color:#f59e0b"></i> Filtros
+        </div>
+        <div class="p-3">
             <form method="get" action="audit.php" class="row g-2 align-items-end">
                 <div class="col-md-4">
-                    <label class="form-label small fw-semibold mb-1">Acción</label>
-                    <select name="action" class="form-select form-select-sm">
+                    <label class="form-label small fw-semibold mb-1" style="color:#9ca3af;">Acción</label>
+                    <select name="action" class="form-select form-select-sm bg-dark border-secondary text-light">
                         <option value="">Todas las acciones</option>
                         <?php foreach ($actions as $a): ?>
-                        <option value="<?= htmlspecialchars($a) ?>"
-                            <?= $filterAction === $a ? 'selected' : '' ?>>
+                        <option value="<?= htmlspecialchars($a) ?>" <?= $filterAction === $a ? 'selected' : '' ?>>
                             <?= htmlspecialchars($a) ?>
                         </option>
                         <?php endforeach; ?>
                     </select>
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label small fw-semibold mb-1">Usuario</label>
-                    <input type="text" name="user" class="form-control form-control-sm"
-                           placeholder="Buscar por usuario..."
-                           value="<?= htmlspecialchars($filterUser) ?>">
+                    <label class="form-label small fw-semibold mb-1" style="color:#9ca3af;">Usuario</label>
+                    <input type="text" name="user" class="form-control form-control-sm bg-dark border-secondary text-light"
+                           placeholder="Buscar usuario..." value="<?= htmlspecialchars($filterUser) ?>">
                 </div>
                 <div class="col-md-2">
                     <button type="submit" class="btn btn-primary btn-sm w-100">
@@ -229,7 +217,7 @@ function buildPageUrl(int $p, string $action, string $user): string {
                     </button>
                 </div>
                 <div class="col-md-2">
-                    <a href="audit.php" class="btn btn-outline-secondary btn-sm w-100">
+                    <a href="audit.php" class="btn btn-sm w-100" style="background:rgba(255,255,255,.06);color:#9ca3af;border:1px solid rgba(255,255,255,.1);">
                         <i class="bi bi-x me-1"></i>Limpiar
                     </a>
                 </div>
@@ -238,87 +226,67 @@ function buildPageUrl(int $p, string $action, string $user): string {
     </div>
 
     <!-- Tabla de logs -->
-    <div class="card">
-        <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center">
-            <span class="fw-semibold">
-                <i class="bi bi-list-ul me-2 text-secondary"></i>
-                Eventos de Auditoría
-            </span>
-            <small class="text-muted"><?= number_format($total) ?> registros</small>
+    <div class="hub-card">
+        <div class="hub-card-header justify-content-between">
+            <span><i class="bi bi-list-ul me-2" style="color:#4f8ef7"></i>Eventos de Auditoría</span>
+            <span style="font-size:.75rem;color:#6b7280;font-weight:400;"><?= number_format($total) ?> registros</span>
         </div>
         <div class="table-responsive">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>Fecha</th>
-                        <th>Acción</th>
-                        <th>Documento</th>
-                        <th>Usuario</th>
-                        <th>Cambio</th>
-                        <th>IP</th>
+            <table class="table mb-0" style="font-size:.82rem;">
+                <thead style="background:rgba(255,255,255,.03);">
+                    <tr style="color:#6b7280;">
+                        <th class="px-4 py-3 fw-semibold">Fecha</th>
+                        <th class="py-3 fw-semibold">Acción</th>
+                        <th class="py-3 fw-semibold">Documento</th>
+                        <th class="py-3 fw-semibold">Usuario</th>
+                        <th class="py-3 fw-semibold">Cambio</th>
+                        <th class="py-3 fw-semibold">IP</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($logs)): ?>
-                    <tr>
-                        <td colspan="6" class="text-center text-muted py-4">
-                            Sin registros que coincidan con el filtro
-                        </td>
-                    </tr>
+                    <tr><td colspan="6" class="text-center py-5" style="color:#6b7280;">
+                        <i class="bi bi-inbox fs-2 d-block mb-2"></i>Sin registros con ese filtro
+                    </td></tr>
                     <?php else: ?>
-                    <?php foreach ($logs as $log): ?>
-                    <tr>
-                        <td class="text-muted" style="white-space:nowrap">
+                    <?php
+                    $actionMap = [
+                        'Created'=>['bi-plus-circle-fill','#10b981'],
+                        'Updated'=>['bi-pencil-fill','#f59e0b'],
+                        'StatusChanged'=>['bi-arrow-repeat','#4f8ef7'],
+                        'Approved'=>['bi-check-circle-fill','#10b981'],
+                        'Rejected'=>['bi-x-circle-fill','#ef4444'],
+                        'Downloaded'=>['bi-download','#14b8a6'],
+                        'ApprovalAdded'=>['bi-person-check-fill','#4f8ef7'],
+                        'ApprovalReviewed'=>['bi-patch-check-fill','#10b981'],
+                    ];
+                    foreach ($logs as $log):
+                        [$ico, $col] = $actionMap[$log['action']] ?? ['bi-circle','#6b7280'];
+                    ?>
+                    <tr style="border-color:rgba(255,255,255,.05);">
+                        <td class="px-4 py-2" style="white-space:nowrap;color:#6b7280;">
                             <?= date('d/m/Y H:i', strtotime($log['created_at'])) ?>
                         </td>
-                        <td>
-                            <?php
-                            $actionColors = [
-                                'Created'      => 'success',
-                                'Updated'      => 'warning',
-                                'StatusChange' => 'primary',
-                                'Approved'     => 'success',
-                                'Rejected'     => 'danger',
-                                'Obsolete'     => 'secondary',
-                                'Downloaded'   => 'info',
-                            ];
-                            $color = $actionColors[$log['action']] ?? 'dark';
-                            ?>
-                            <span class="badge bg-<?= $color ?> bg-opacity-10
-                                              text-<?= $color ?> border border-<?= $color ?>
-                                              border-opacity-25">
-                                <?= htmlspecialchars($log['action']) ?>
+                        <td class="py-2">
+                            <span style="display:inline-flex;align-items:center;gap:5px;background:<?= $col ?>18;color:<?= $col ?>;padding:3px 9px;border-radius:99px;font-size:.75rem;font-weight:600;">
+                                <i class="bi <?= $ico ?>"></i><?= htmlspecialchars($log['action']) ?>
                             </span>
                         </td>
-                        <td>
+                        <td class="py-2">
                             <?php if ($log['document_code']): ?>
-                            <span class="font-monospace small text-muted me-1">
-                                <?= htmlspecialchars($log['document_code']) ?>
-                            </span>
-                            <span class="small">
-                                <?= htmlspecialchars(
-                                    mb_strimwidth($log['document_title'] ?? '', 0, 30, '…')
-                                ) ?>
-                            </span>
-                            <?php else: ?>
-                            <span class="text-muted">—</span>
-                            <?php endif; ?>
+                            <span class="font-monospace small me-1" style="color:#6b7280;"><?= htmlspecialchars($log['document_code']) ?></span>
+                            <span style="color:#d1d5db;"><?= htmlspecialchars(mb_strimwidth($log['document_title'] ?? '', 0, 28, '…')) ?></span>
+                            <?php else: ?><span style="color:#6b7280;">—</span><?php endif; ?>
                         </td>
-                        <td class="small">
-                            <?= htmlspecialchars($log['username'] ?? 'Sistema') ?>
-                        </td>
-                        <td class="small text-muted">
+                        <td class="py-2" style="color:#c8d0e0;"><?= htmlspecialchars($log['username'] ?? 'Sistema') ?></td>
+                        <td class="py-2 small" style="color:#6b7280;">
                             <?php if ($log['old_value'] || $log['new_value']): ?>
                                 <?= htmlspecialchars($log['old_value'] ?? '—') ?>
-                                <i class="bi bi-arrow-right mx-1"></i>
+                                <i class="bi bi-arrow-right mx-1" style="color:#4f8ef7;font-size:.65rem;"></i>
                                 <?= htmlspecialchars($log['new_value'] ?? '—') ?>
-                            <?php else: ?>
-                                —
-                            <?php endif; ?>
+                            <?php else: ?>—<?php endif; ?>
                         </td>
-                        <td class="small text-muted">
-                            <?= htmlspecialchars($log['ip_address'] ?? '—') ?>
-                        </td>
+                        <td class="py-2 small" style="color:#6b7280;"><?= htmlspecialchars($log['ip_address'] ?? '—') ?></td>
                     </tr>
                     <?php endforeach; ?>
                     <?php endif; ?>
@@ -328,35 +296,20 @@ function buildPageUrl(int $p, string $action, string $user): string {
 
         <!-- Paginación -->
         <?php if ($totalPages > 1): ?>
-        <div class="card-footer bg-white d-flex justify-content-between align-items-center">
-            <small class="text-muted">
-                Página <?= $page ?> de <?= $totalPages ?>
-            </small>
+        <div style="padding:12px 18px;border-top:1px solid rgba(255,255,255,.07);display:flex;justify-content:space-between;align-items:center;">
+            <small style="color:#6b7280;">Página <?= $page ?> de <?= $totalPages ?></small>
             <nav>
                 <ul class="pagination pagination-sm mb-0">
-                    <li class="page-item <?= $page <= 1 ? 'disabled' : '' ?>">
-                        <a class="page-link"
-                           href="<?= buildPageUrl($page - 1, $filterAction, $filterUser) ?>">
-                            ‹
-                        </a>
+                    <li class="page-item <?= $page<=1?'disabled':'' ?>">
+                        <a class="page-link bg-dark border-secondary text-light" href="<?= buildPageUrl($page-1,$filterAction,$filterUser) ?>">‹</a>
                     </li>
-                    <?php
-                    $start = max(1, $page - 2);
-                    $end   = min($totalPages, $page + 2);
-                    for ($i = $start; $i <= $end; $i++):
-                    ?>
-                    <li class="page-item <?= $i === $page ? 'active' : '' ?>">
-                        <a class="page-link"
-                           href="<?= buildPageUrl($i, $filterAction, $filterUser) ?>">
-                            <?= $i ?>
-                        </a>
+                    <?php for ($i=max(1,$page-2); $i<=min($totalPages,$page+2); $i++): ?>
+                    <li class="page-item <?= $i===$page?'active':'' ?>">
+                        <a class="page-link bg-dark border-secondary text-light" href="<?= buildPageUrl($i,$filterAction,$filterUser) ?>"><?= $i ?></a>
                     </li>
                     <?php endfor; ?>
-                    <li class="page-item <?= $page >= $totalPages ? 'disabled' : '' ?>">
-                        <a class="page-link"
-                           href="<?= buildPageUrl($page + 1, $filterAction, $filterUser) ?>">
-                            ›
-                        </a>
+                    <li class="page-item <?= $page>=$totalPages?'disabled':'' ?>">
+                        <a class="page-link bg-dark border-secondary text-light" href="<?= buildPageUrl($page+1,$filterAction,$filterUser) ?>">›</a>
                     </li>
                 </ul>
             </nav>
@@ -365,11 +318,245 @@ function buildPageUrl(int $p, string $action, string $user): string {
     </div>
 
     <?php endif; ?>
-</div>
+</main>
 
-<footer class="text-center text-muted py-3 mt-4" style="font-size:.8rem">
-    Datos desde PostgreSQL <code>(qualitydoc_audit)</code> · <?= APP_NAME ?>
-</footer>
-
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+document.addEventListener('click', e => {
+    const sb = document.getElementById('sidebar');
+    if (window.innerWidth < 768 && !sb.contains(e.target) && !e.target.closest('[onclick]'))
+        sb.classList.remove('open');
+});
+</script>
 </body>
 </html>
+===DOCUMENTS===
+<?php
+// =============================================================================
+// QualityDoc Portal — Documentos (con sidebar compartida)
+// =============================================================================
+require_once 'config.php';
+requireLogin();
+
+$user  = getSessionUser();
+$token = getSessionToken();
+$role  = $user['role'] ?? 'Viewer';
+$pgOk  = false;
+
+// Verificar PostgreSQL (para el indicador del topbar)
+try { getPgConnection(); $pgOk = true; } catch (Exception $e) {}
+
+$query    = trim($_GET['q']        ?? '');
+$category = trim($_GET['category'] ?? '');
+$results  = [];
+$total    = 0;
+$error    = null;
+
+$categoriesData = callSearchApi('/api/categories');
+$categories     = $categoriesData['categories'] ?? [];
+
+if ($query !== '' || $category !== '') {
+    $path = '/api/search?q=' . urlencode($query);
+    if ($category !== '') $path .= '&category=' . urlencode($category);
+    $path .= '&status=Approved';
+    $data    = callSearchApi($path);
+    $results = $data['results'] ?? [];
+    $total   = $data['total']   ?? count($results);
+    if (empty($data) && ($query !== '' || $category !== ''))
+        $error = 'El servicio de búsqueda no está disponible.';
+} else {
+    $data    = callSearchApi('/api/search?q=&status=Approved');
+    $results = $data['results'] ?? [];
+    $total   = $data['total']   ?? count($results);
+}
+
+$currentPage = 'documents';
+?>
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Documentos — <?= APP_NAME ?></title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        :root { --sidebar-w:260px; --topbar-h:56px; --bg-sidebar:#0f1117; --bg-main:#13151a; --accent:#4f8ef7; }
+        body { margin:0; background:var(--bg-main); font-family:'Segoe UI',system-ui,sans-serif; }
+        #sidebar { position:fixed; top:0; left:0; bottom:0; width:var(--sidebar-w); background:var(--bg-sidebar); border-right:1px solid rgba(255,255,255,.07); display:flex; flex-direction:column; z-index:200; transition:transform .25s; }
+        .sidebar-brand { display:flex; align-items:center; gap:10px; padding:18px 20px 16px; border-bottom:1px solid rgba(255,255,255,.07); }
+        .brand-icon { width:36px; height:36px; border-radius:8px; background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:1.1rem; color:#fff; }
+        .brand-name { font-weight:700; font-size:.95rem; color:#e8eaf0; }
+        .brand-sub  { font-size:.72rem; color:#6b7280; }
+        .sidebar-user { display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.07); }
+        .user-avatar { width:34px; height:34px; border-radius:50%; background:linear-gradient(135deg,#4f8ef7,#7c3aed); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.85rem; color:#fff; flex-shrink:0; }
+        .user-name { font-size:.82rem; font-weight:600; color:#e0e2ea; }
+        .user-role { font-size:.7rem; color:#6b7280; }
+        .sidebar-section { padding:14px 12px 4px; font-size:.66rem; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#4b5563; }
+        .nav-item-link { display:flex; align-items:center; gap:11px; padding:9px 14px; margin:1px 8px; border-radius:8px; text-decoration:none; color:#9ca3af; font-size:.85rem; font-weight:500; transition:background .15s,color .15s; }
+        .nav-item-link:hover  { background:rgba(79,142,247,.12); color:#c8d4f5; }
+        .nav-item-link.active { background:rgba(79,142,247,.18); color:var(--accent); }
+        .nav-item-link i { font-size:1rem; width:18px; text-align:center; }
+        .sidebar-services { padding:0 12px 8px; }
+        .service-badge { display:flex; align-items:center; gap:8px; padding:7px 10px; margin-bottom:2px; border-radius:8px; text-decoration:none; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); font-size:.78rem; color:#9ca3af; transition:background .15s,color .15s; }
+        .service-badge:hover { background:rgba(255,255,255,.07); color:#d1d5db; }
+        .service-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+        .dot-ok  { background:#22c55e; } .dot-off { background:#6b7280; }
+        .sidebar-footer { margin-top:auto; padding:14px 12px; border-top:1px solid rgba(255,255,255,.07); }
+        #topbar { position:fixed; top:0; left:var(--sidebar-w); right:0; height:var(--topbar-h); background:var(--bg-sidebar); border-bottom:1px solid rgba(255,255,255,.07); display:flex; align-items:center; padding:0 24px; z-index:100; gap:12px; }
+        .page-title { font-size:1rem; font-weight:600; color:#e0e2ea; }
+        #main { margin-left:var(--sidebar-w); margin-top:var(--topbar-h); padding:28px 28px 40px; min-height:calc(100vh - var(--topbar-h)); }
+        .hub-card { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden; }
+        .hub-card-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.07); display:flex; align-items:center; gap:8px; font-size:.85rem; font-weight:600; color:#c8d0e0; }
+        .doc-card { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:18px; transition:border-color .2s, transform .2s; height:100%; }
+        .doc-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+        .tag-pill { font-size:.68rem; background:rgba(255,255,255,.06); color:#9ca3af; border:1px solid rgba(255,255,255,.08); border-radius:99px; padding:2px 8px; }
+        @media(max-width:768px){ #sidebar{transform:translateX(-100%);} #sidebar.open{transform:translateX(0);} #topbar,#main{left:0;margin-left:0;} }
+    </style>
+</head>
+<body>
+<?php require_once '_sidebar.php'; ?>
+
+<main id="main">
+
+    <div class="mb-4">
+        <h5 class="fw-bold text-white mb-1">Documentos Aprobados</h5>
+        <p class="text-muted small mb-0">Búsqueda indexada en <strong>MongoDB</strong> via microservicio Node.js</p>
+    </div>
+
+    <!-- Búsqueda -->
+    <div class="hub-card mb-4">
+        <div class="hub-card-header">
+            <i class="bi bi-search" style="color:#10b981"></i> Buscar Documentos
+        </div>
+        <div class="p-3">
+            <form method="get" action="documents.php" class="row g-2 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold mb-1" style="color:#9ca3af;">Búsqueda</label>
+                    <div class="input-group">
+                        <span class="input-group-text bg-dark border-secondary" style="color:#6b7280;">
+                            <i class="bi bi-search"></i>
+                        </span>
+                        <input type="text" name="q" class="form-control bg-dark border-secondary text-light"
+                               placeholder="Título, código, descripción, etiquetas..."
+                               value="<?= htmlspecialchars($query) ?>">
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold mb-1" style="color:#9ca3af;">Categoría</label>
+                    <select name="category" class="form-select bg-dark border-secondary text-light">
+                        <option value="">Todas las categorías</option>
+                        <?php foreach ($categories as $cat): ?>
+                        <option value="<?= htmlspecialchars($cat) ?>" <?= $category===$cat?'selected':'' ?>>
+                            <?= htmlspecialchars($cat) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary flex-grow-1">
+                        <i class="bi bi-search me-1"></i>Buscar
+                    </button>
+                    <?php if ($query || $category): ?>
+                    <a href="documents.php" class="btn" style="background:rgba(255,255,255,.06);color:#9ca3af;border:1px solid rgba(255,255,255,.1);" title="Limpiar">
+                        <i class="bi bi-x"></i>
+                    </a>
+                    <?php endif; ?>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <?php if ($error): ?>
+    <div class="alert border-0 mb-4" style="background:rgba(245,158,11,.1);color:#fcd34d;">
+        <i class="bi bi-exclamation-triangle me-2"></i>
+        <?= htmlspecialchars($error) ?>
+        <br><small>Verifica que los contenedores Docker estén corriendo.</small>
+    </div>
+    <?php endif; ?>
+
+    <!-- Encabezado resultados -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <span style="font-size:.82rem;color:#6b7280;">
+            <i class="bi bi-files me-1"></i>
+            <?= $total ?> documento<?= $total!==1?'s':'' ?> encontrado<?= $total!==1?'s':'' ?>
+        </span>
+        <?php if ($query || $category): ?>
+        <div style="font-size:.78rem;color:#9ca3af;">
+            <?php if ($query): ?>
+            <span style="background:rgba(79,142,247,.15);color:#4f8ef7;padding:2px 8px;border-radius:99px;margin-right:4px;">
+                <i class="bi bi-search me-1"></i><?= htmlspecialchars($query) ?>
+            </span>
+            <?php endif; ?>
+            <?php if ($category): ?>
+            <span style="background:rgba(16,185,129,.15);color:#10b981;padding:2px 8px;border-radius:99px;">
+                <i class="bi bi-folder me-1"></i><?= htmlspecialchars($category) ?>
+            </span>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- Resultados -->
+    <?php if (empty($results)): ?>
+    <div class="hub-card p-5 text-center" style="color:#6b7280;">
+        <i class="bi bi-inbox fs-1 d-block mb-3 opacity-25"></i>
+        <div class="fw-semibold mb-1">No hay documentos disponibles</div>
+        <small>Los documentos deben estar en estado <strong>Aprobado</strong> para aparecer aquí.</small>
+    </div>
+    <?php else: ?>
+    <div class="row g-3">
+        <?php foreach ($results as $doc): ?>
+        <div class="col-md-6 col-xl-4">
+            <div class="doc-card">
+                <div class="d-flex align-items-start justify-content-between mb-2">
+                    <span class="font-monospace" style="font-size:.72rem;background:rgba(255,255,255,.06);color:#9ca3af;padding:2px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);">
+                        <?= htmlspecialchars($doc['code'] ?? '—') ?>
+                    </span>
+                    <?= statusBadge($doc['status'] ?? 'Approved') ?>
+                </div>
+
+                <div class="d-flex align-items-start gap-2 mb-2">
+                    <?php if (!empty($doc['fileExtension'])): ?>
+                    <span class="fs-5 flex-shrink-0"><?= extIcon($doc['fileExtension']) ?></span>
+                    <?php endif; ?>
+                    <div class="fw-semibold" style="color:#e0e2ea;line-height:1.3;">
+                        <?= htmlspecialchars($doc['title'] ?? 'Sin título') ?>
+                    </div>
+                </div>
+
+                <div class="small mb-3" style="color:#6b7280;">
+                    <?php if (!empty($doc['category'])): ?>
+                    <i class="bi bi-folder me-1"></i><?= htmlspecialchars($doc['category']) ?>
+                    <?php endif; ?>
+                    <?php if (!empty($doc['standard'])): ?>
+                    &nbsp;·&nbsp;<i class="bi bi-award me-1"></i><?= htmlspecialchars($doc['standard']) ?>
+                    <?php endif; ?>
+                    <?php if (!empty($doc['fileSize'])): ?>
+                    &nbsp;·&nbsp;<i class="bi bi-hdd me-1"></i><?= formatSize((int)$doc['fileSize']) ?>
+                    <?php endif; ?>
+                </div>
+
+                <?php if (!empty($doc['tags'])): ?>
+                <div>
+                    <?php foreach ((array)$doc['tags'] as $tag): ?>
+                    <span class="tag-pill me-1 mb-1 d-inline-block"><?= htmlspecialchars($tag) ?></span>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+document.addEventListener('click', e => {
+    const sb = document.getElementById('sidebar');
+    if (window.innerWidth < 768 && !sb.contains(e.target) && !e.target.closest('[onclick]'))
+        sb.classList.remove('open');
+});
+</script>
+</body>

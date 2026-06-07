@@ -1,4 +1,3 @@
-
 services:
 
   # ── Node.js Search Service ────────────────────────────────────────────────────
@@ -57,13 +56,6 @@ services:
       SESSION_SECRET: "${SESSION_SECRET:-QualityDoc-JWT-Secret-Change-Me!}"
       NODE_API_PORT:  "5000"
 
-# ── Red compartida (creada por docker-compose.infra.yml) ──────────────────────
-networks:
-  qualitydoc_net:
-    name: qualitydoc_net
-    external: true
-
-
   # ── Portal PHP ────────────────────────────────────────────────────────────────
   php-portal:
     build:
@@ -81,3 +73,9 @@ networks:
     depends_on:
       - qualitydoc-app
       - search-service
+
+# ── Red compartida (creada por docker-compose.infra.yml) ──────────────────────
+networks:
+  qualitydoc_net:
+    name: qualitydoc_net
+    external: true

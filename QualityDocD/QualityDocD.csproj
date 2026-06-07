@@ -10,20 +10,27 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
-		<PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="9.0.0" />
-		<PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.0" />
-		<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.0" />
-		<PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
-		<PackageReference Include="Humanizer.Core" Version="2.14.1" />
-		<PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.*" />
-		<PackageReference Include="Microsoft.IdentityModel.Tokens" Version="8.*" />
-		<PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />
+		<!-- Entity Framework -->
+		<PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer"  Version="9.0.0" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Tools"      Version="9.0.0" />
+		<PackageReference Include="Microsoft.EntityFrameworkCore.Design"     Version="9.0.0" />
+		<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"    Version="9.0.0" />
 
+		<!-- Autenticación y JWT -->
+		<PackageReference Include="BCrypt.Net-Next"                          Version="4.0.3" />
+		<PackageReference Include="System.IdentityModel.Tokens.Jwt"         Version="8.*"   />
+		<PackageReference Include="Microsoft.IdentityModel.Tokens"           Version="8.*"   />
+
+		<!-- MongoDB — ACTIVADO -->
+		<PackageReference Include="MongoDB.Driver"                           Version="2.28.0" />
+
+		<!-- Utilidades -->
+		<PackageReference Include="Humanizer.Core"                           Version="2.14.1" />
+		<PackageReference Include="Yarp.ReverseProxy"                        Version="2.3.0"  />
 	</ItemGroup>
 
 	<ItemGroup>
-	  <Folder Include="Extensions\" />
+		<Folder Include="Extensions\" />
 	</ItemGroup>
 
 </Project>

@@ -1,7 +1,11 @@
 ﻿'use strict';
 
+require('dotenv').config();
+
 const express  = require('express');
 const mongoose = require('mongoose');
+
+const searchRouter = require('./routes/search');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -9,97 +13,44 @@ const PORT = process.env.PORT || 3001;
 app.use(express.json());
 
 // ── Conexión MongoDB ──────────────────────────────────────────────────────────
-const mongoUri = `mongodb://${process.env.MONGO_USER}:${process.env.MONGO_PASSWORD}` +
-                 `@${process.env.MONGO_HOST || 'mongodb'}:27017/` +
-                 `${process.env.MONGO_DB || 'qualitydoc_meta'}?authSource=admin`;
+const MONGO_HOST = process.env.MONGO_HOST     || 'localhost';
+const MONGO_PORT = process.env.MONGO_PORT     || '27017';
+const MONGO_DB   = process.env.MONGO_DB       || 'qualitydoc_meta';
+const MONGO_USER = process.env.MONGO_USER;
+const MONGO_PASS = process.env.MONGO_PASSWORD;
 
-mongoose.connect(mongoUri)
-  .then(() => console.log('MongoDB conectado'))
-  .catch(err => { console.error('Error MongoDB:', err.message); process.exit(1); });
+let mongoUri;
+if (MONGO_USER && MONGO_PASS) {
+  mongoUri = `mongodb://${MONGO_USER}:${MONGO_PASS}@${MONGO_HOST}:${MONGO_PORT}/${MONGO_DB}?authSource=admin`;
+} else {
+  // Sin autenticación (desarrollo local sin Docker)
+  mongoUri = `mongodb://${MONGO_HOST}:${MONGO_PORT}/${MONGO_DB}`;
+}
 
-// ── Modelo ────────────────────────────────────────────────────────────────────
-const docSchema = new mongoose.Schema({
-  documentId:    { type: Number, required: true, unique: true },
-  code:          String,
-  title:         String,
-  description:   String,
-  category:      String,
-  standard:      String,
-  tags:          [String],
-  fileExtension: String,
-  status:        String,
-  isPublic:      Boolean,
-  updatedAt:     { type: Date, default: Date.now },
-}, { collection: 'document_meta' });
-
-docSchema.index({ title: 'text', description: 'text', tags: 'text', code: 'text' });
-const Doc = mongoose.model('DocumentMeta', docSchema);
+mongoose
+  .connect(mongoUri)
+  .then(() => console.log(`[MongoDB] Conectado a ${MONGO_DB} en ${MONGO_HOST}:${MONGO_PORT}`))
+  .catch(err => {
+    console.error('[MongoDB] Error de conexión:', err.message);
+    process.exit(1);
+  });
 
 // ── Rutas ─────────────────────────────────────────────────────────────────────
 
 // Health check
-app.get('/health', async (req, res) => {
+app.get('/health', async (_req, res) => {
   const state = mongoose.connection.readyState;
-  res.json({ ok: true, mongo: state === 1 ? 'connected' : 'disconnected', service: 'QualityDoc Search' });
+  res.json({
+    ok:      true,
+    mongo:   state === 1 ? 'connected' : 'disconnected',
+    service: 'QualityDoc Search Service',
+  });
 });
 
-// Buscar documentos
-app.get('/api/search', async (req, res) => {
-  try {
-    const { q = '', category, status } = req.query;
-    const filter = {};
+// Rutas de búsqueda y documentos
+app.use('/api', searchRouter);
 
-    if (q.trim()) filter.$text = { $search: q };
-    if (category)  filter.category = category;
-    if (status)    filter.status   = status;
-
-    const results = await Doc.find(filter)
-      .sort(q.trim() ? { score: { $meta: 'textScore' } } : { updatedAt: -1 })
-      .limit(50)
-      .lean();
-
-    res.json({ ok: true, total: results.length, query: q, results });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
+// ── Inicio ────────────────────────────────────────────────────────────────────
+app.listen(PORT, () => {
+  console.log(`[Search Service] Escuchando en puerto ${PORT}`);
 });
-
-// Indexar / actualizar documento
-app.post('/api/documents', async (req, res) => {
-  try {
-    const data = req.body;
-    if (!data.documentId) return res.status(400).json({ ok: false, error: 'documentId requerido' });
-
-    await Doc.findOneAndUpdate(
-      { documentId: data.documentId },
-      { ...data, updatedAt: new Date() },
-      { upsert: true, new: true }
-    );
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// Eliminar documento del índice
-app.delete('/api/documents/:id', async (req, res) => {
-  try {
-    await Doc.deleteOne({ documentId: parseInt(req.params.id) });
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// Categorías disponibles
-app.get('/api/categories', async (req, res) => {
-  try {
-    const cats = await Doc.distinct('category');
-    res.json({ ok: true, categories: cats.filter(Boolean) });
-  } catch (err) {
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-// ── Arrancar servidor ─────────────────────────────────────────────────────────
-app.listen(PORT, () => console.log(`Search service corriendo en puerto ${PORT}`));

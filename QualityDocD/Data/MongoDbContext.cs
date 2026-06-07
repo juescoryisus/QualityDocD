@@ -1,9 +1,7 @@
-﻿namespace QualityDocD.Data;
-
-
-/*using MongoDB.Bson;
+﻿using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
+using Microsoft.Extensions.Configuration;
 
 namespace QualityDocD.Data;
 
@@ -114,4 +112,3 @@ public class DocumentMeta
     [BsonElement("updatedAt")]
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
-*/

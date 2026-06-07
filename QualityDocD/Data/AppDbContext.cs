@@ -27,6 +27,7 @@ public class AppDbContext : DbContext
             e.HasIndex(u => u.Email).IsUnique();
             e.Property(u => u.Role).HasDefaultValue("Viewer");
             e.Property(u => u.IsActive).HasDefaultValue(true);
+            e.ToTable(t => t.UseSqlOutputClause(false)); // preparado para triggers
         });
 
         // ── Document ──────────────────────────────────────────────────────────
@@ -38,6 +39,7 @@ public class AppDbContext : DbContext
              .WithMany(u => u.CreatedDocuments)
              .HasForeignKey(d => d.CreatedByUserId)
              .OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => t.UseSqlOutputClause(false)); // preparado para triggers
         });
 
         // ── DocumentApproval ─────────────────────────────────────────────────
@@ -52,6 +54,7 @@ public class AppDbContext : DbContext
              .WithMany(u => u.Approvals)
              .HasForeignKey(a => a.ReviewerId)
              .OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => t.UseSqlOutputClause(false)); // preparado para triggers
         });
 
         // ── AuditLog ──────────────────────────────────────────────────────────
@@ -65,7 +68,7 @@ public class AppDbContext : DbContext
              .WithMany()
              .HasForeignKey(l => l.UserId)
              .OnDelete(DeleteBehavior.SetNull);
+            e.ToTable(t => t.UseSqlOutputClause(false)); // preparado para triggers
         });
-
     }
 }

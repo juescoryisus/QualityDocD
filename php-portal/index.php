@@ -113,6 +113,10 @@ $searchOk = !empty($health['ok']);
             <a class="nav-link" href="audit.php">
                 <i class="bi bi-journal-text me-1"></i>Auditoría
             </a>
+             </a>
+            <a class="nav-link text-warning fw-semibold" href="http://localhost:5001" target="_blank">
+                <i class="bi bi-arrow-left-circle me-1"></i>Volver al Sistema
+            </a>
         </div>
     </div>
 </nav>

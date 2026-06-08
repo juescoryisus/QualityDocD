@@ -5,19 +5,34 @@ using Microsoft.Extensions.Configuration;
 
 namespace QualityDocD.Data;
 
-/// <summary>
-/// Contexto MongoDB.
-/// Maneja: document_metadata (metadatos flexibles + búsqueda full-text).
-/// </summary>
 public class MongoDbContext
 {
     private readonly IMongoDatabase _db;
 
     public MongoDbContext(IConfiguration config)
     {
-        var uri = config["MongoDB:Uri"] ?? "mongodb://localhost:27017";
+        var host = config["MongoDB:Host"] ?? "localhost";
+        var port = int.Parse(config["MongoDB:Port"] ?? "27017");
         var dbName = config["MongoDB:Database"] ?? "qualitydoc_meta";
-        var client = new MongoClient(uri);
+        var username = config["MongoDB:Username"];
+        var password = config["MongoDB:Password"];
+
+        MongoClient client;
+        if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
+        {
+            var credential = MongoCredential.CreateCredential("admin", username, password);
+            var settings = new MongoClientSettings
+            {
+                Server = new MongoServerAddress(host, port),
+                Credential = credential
+            };
+            client = new MongoClient(settings);
+        }
+        else
+        {
+            client = new MongoClient($"mongodb://{host}:{port}");
+        }
+
         _db = client.GetDatabase(dbName);
         EnsureIndexes();
     }
@@ -30,7 +45,7 @@ public class MongoDbContext
         var col = DocumentMetas;
         var keys = Builders<DocumentMeta>.IndexKeys;
 
-        col.Indexes.CreateMany(new[]
+        var indexModels = new[]
         {
             new CreateIndexModel<DocumentMeta>(
                 keys.Ascending(d => d.DocumentId),
@@ -48,27 +63,35 @@ public class MongoDbContext
                 keys.Ascending(d => d.Tags),
                 new CreateIndexOptions { Name = "idx_tags" }),
 
-            // Índice full-text con pesos por campo
             new CreateIndexModel<DocumentMeta>(
                 keys.Text(d => d.Title)
                     .Text(d => d.Description)
-                    .Text("Tags"),
+                    .Text("tags"),
                 new CreateIndexOptions
                 {
                     Name    = "idx_fulltext",
                     Weights = new BsonDocument
                     {
-                        ["Title"]       = 10,
-                        ["Tags"]        = 5,
-                        ["Standard"]    = 3,
-                        ["Description"] = 1,
+                        ["title"]       = 10,
+                        ["tags"]        = 5,
+                        ["standard"]    = 3,
+                        ["description"] = 1,
                     }
                 }),
-        });
+        };
+
+        try
+        {
+            col.Indexes.CreateMany(indexModels);
+        }
+        catch (MongoCommandException)
+        {
+            // Índice existente con opciones distintas — borrar y recrear
+            col.Indexes.DropAll();
+            col.Indexes.CreateMany(indexModels);
+        }
     }
 }
-
-// ── Documento MongoDB ─────────────────────────────────────────────────────────
 
 public class DocumentMeta
 {

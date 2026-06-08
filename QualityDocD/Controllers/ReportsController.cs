@@ -1,5 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MongoDB.Driver;
+using QualityDocD.Data;
 using QualityDocD.Models.ViewModels;
 using QualityDocD.Services;
 
@@ -9,8 +11,13 @@ namespace QualityDocD.Controllers;
 public class ReportsController : Controller
 {
     private readonly DocumentService _svc;
+    private readonly MongoDbContext _mongo;
 
-    public ReportsController(DocumentService svc) => _svc = svc;
+    public ReportsController(DocumentService svc, MongoDbContext mongo)
+    {
+        _svc = svc;
+        _mongo = mongo;
+    }
 
     // GET /Reports/Compliance
     public async Task<IActionResult> Compliance(string? dateFrom, string? dateTo)
@@ -35,5 +42,43 @@ public class ReportsController : Controller
 
         var vm = await _svc.SearchAsync(q ?? "", category, status);
         return View(vm);
+    }
+
+    // GET /Reports/MongoJson
+    [Authorize(Roles = "Admin")]
+    public async Task<IActionResult> MongoJson()
+    {
+        var docs = await _mongo.DocumentMetas
+            .Find(_ => true)
+            .ToListAsync();
+
+        var json = System.Text.Json.JsonSerializer.Serialize(docs,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            });
+
+        ViewData["Title"] = "Metadatos MongoDB";
+        ViewBag.Json = json;
+        ViewBag.Count = docs.Count;
+        return View();
+    }
+
+    // GET /Reports/MongoJson/raw  — descarga el archivo JSON
+    [Authorize(Roles = "Admin")]
+    [Route("Reports/MongoJson/raw")]
+    public async Task<IActionResult> MongoJsonRaw()
+    {
+        var docs = await _mongo.DocumentMetas.Find(_ => true).ToListAsync();
+        var json = System.Text.Json.JsonSerializer.Serialize(docs,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+            });
+        return File(System.Text.Encoding.UTF8.GetBytes(json),
+                    "application/json",
+                    $"mongodb-metadata-{DateTime.Now:yyyyMMdd-HHmm}.json");
     }
 }

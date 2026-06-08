@@ -76,20 +76,70 @@ app.UseAuthorization();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
+
+    try
+    {
+        await db.Database.MigrateAsync();
+    }
+    catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 2714)
+    {
+        // Las tablas ya existen sin historial de migraciones — se puede continuar
+    }
 
     if (!await db.Users.AnyAsync())
     {
-        db.Users.Add(new User
-        {
-            Username = "admin",
-            Email = "admin@qualitydoc.local",
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin123!"),
-            Role = "Admin",
-            Department = "TI",
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
-        });
+        db.Users.AddRange(
+            new User
+            {
+                Username = "admin",
+                Email = "admin@qualitydoc.local",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin123!"),
+                Role = "Admin",
+                Department = "TI",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new User
+            {
+                Username = "gerente",
+                Email = "gerente@qualitydoc.local",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Gerente123!"),
+                Role = "Manager",
+                Department = "Calidad",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new User
+            {
+                Username = "revisor1",
+                Email = "revisor1@qualitydoc.local",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Revisor123!"),
+                Role = "Reviewer",
+                Department = "Producción",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new User
+            {
+                Username = "revisor2",
+                Email = "revisor2@qualitydoc.local",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Revisor123!"),
+                Role = "Reviewer",
+                Department = "Calidad",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            },
+            new User
+            {
+                Username = "editor",
+                Email = "editor@qualitydoc.local",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Editor123!"),
+                Role = "Editor",
+                Department = "Operaciones",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            }
+        );
         await db.SaveChangesAsync();
     }
 }

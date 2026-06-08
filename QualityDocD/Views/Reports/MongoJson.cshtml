@@ -1,0 +1,48 @@
+﻿@{
+    ViewData["Title"] = "Metadatos MongoDB";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-filetype-json me-2 text-warning"></i>Metadatos MongoDB
+    </h4>
+    <div class="d-flex gap-2">
+        <span class="badge bg-warning text-dark fs-6">@ViewBag.Count documentos</span>
+        <a href="/Reports/MongoJson/raw" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-download me-1"></i>Descargar JSON
+        </a>
+        <button class="btn btn-sm btn-outline-primary" onclick="copyJson()">
+            <i class="bi bi-clipboard me-1"></i>Copiar
+        </button>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-dark d-flex justify-content-between align-items-center py-2">
+        <span class="text-warning small font-monospace">
+            <i class="bi bi-database me-1"></i>qualitydoc_meta → document_metadata
+        </span>
+        <span class="text-muted small">@DateTime.Now.ToString("dd/MM/yyyy HH:mm")</span>
+    </div>
+    <div class="card-body p-0" style="background:#1e1e1e;">
+        <pre id="jsonOutput" class="p-4 mb-0 text-success small font-monospace"
+             style="max-height:70vh; overflow-y:auto; white-space:pre-wrap; word-break:break-word;">@ViewBag.Json</pre>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        function copyJson() {
+            navigator.clipboard.writeText(document.getElementById('jsonOutput').innerText)
+                .then(() => {
+                    const btn = event.target.closest('button');
+                    btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Copiado';
+                    btn.classList.replace('btn-outline-primary', 'btn-success');
+                    setTimeout(() => {
+                        btn.innerHTML = '<i class="bi bi-clipboard me-1"></i>Copiar';
+                        btn.classList.replace('btn-success', 'btn-outline-primary');
+                    }, 2000);
+                });
+        }
+    </script>
+}

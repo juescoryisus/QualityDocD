@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using QualityDocD.Data;
+using QualityDocD.Models.Domain;
 using QualityDocD.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -70,6 +71,28 @@ app.UseRouting();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// ── Seed automático del admin ──────────────────────────────────────────────────
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.MigrateAsync();
+
+    if (!await db.Users.AnyAsync())
+    {
+        db.Users.Add(new User
+        {
+            Username = "admin",
+            Email = "admin@qualitydoc.local",
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin123!"),
+            Role = "Admin",
+            Department = "TI",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+    }
+}
 
 // Proxy hacia Node API y Search Service
 app.MapReverseProxy();

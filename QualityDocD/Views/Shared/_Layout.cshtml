@@ -47,6 +47,15 @@
                                         <i class="bi bi-search me-2"></i>Búsqueda Avanzada
                                     </a>
                                 </li>
+                                @if (User.IsInRole("Admin"))
+                                {
+                                    <li><hr class="dropdown-divider" /></li>
+                                    <li>
+                                        <a class="dropdown-item" href="http://localhost:8080" target="_blank">
+                                            <i class="bi bi-database-check me-2"></i>Portal Auditoría
+                                        </a>
+                                    </li>
+                                }
                             </ul>
                         </li>
                         @if (User.IsInRole("Admin"))
@@ -54,11 +63,6 @@
                             <li class="nav-item">
                                 <a class="nav-link" asp-controller="Auth" asp-action="Register">
                                     <i class="bi bi-person-plus me-1"></i>Registrar Usuario
-                                </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" href="http://localhost:8080" target="_blank">
-                                    <i class="bi bi-database-check me-1"></i>Portal Auditoría
                                 </a>
                             </li>
                         }

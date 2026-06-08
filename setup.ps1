@@ -1,4 +1,4 @@
-
+﻿
 param(
     [ValidateSet("All", "Infra", "Apps", "Portal")]
     [string] $Mode = "All",

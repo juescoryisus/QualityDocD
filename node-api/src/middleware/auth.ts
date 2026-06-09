@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import type { UserRole } from "../lib/schemas";
 
 const SESSION_SECRET = process.env.SESSION_SECRET ?? "dev-secret";
 
@@ -7,7 +8,7 @@ export interface AuthPayload {
   userId: number;
   companyId: number;
   companySlug: string;
-  role: string;
+  role: UserRole;
 }
 
 declare global {

@@ -1,5 +1,9 @@
 .env
 
+# Node
+node-api/node_modules/
+node-api/dist/
+
 # .NET
 bin/
 obj/

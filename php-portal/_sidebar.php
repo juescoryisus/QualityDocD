@@ -4,34 +4,59 @@
 // Requiere que el padre haya definido:
 //   $currentPage  string  ('dashboard' | 'documents' | 'audit' | etc.)
 //   $user         array   getSessionUser()
-//   $role         string  $user['role'] ?? 'Viewer'
+//   $role         string  $user['role'] ?? 'VIEWER'
 //   $pgOk         bool    true si PostgreSQL está disponible
 // =============================================================================
+
+// Mapa de roles nuevos (6) a categorías de acceso
+$roleCan = [
+    'SUPER_ADMIN'   => ['dashboard','documents','audit','reports','users','settings'],
+    'COMPANY_ADMIN' => ['dashboard','documents','audit','reports','users'],
+    'OPERATOR'      => ['dashboard','documents','audit'],
+    'CONTRIBUTOR'   => ['dashboard','documents'],
+    'COMMENTER'     => ['dashboard','documents'],
+    'VIEWER'        => ['dashboard','documents'],
+];
+
 $navItems = [
-    ['icon'=>'bi-speedometer2',    'label'=>'Dashboard',    'href'=>'dashboard.php', 'key'=>'dashboard', 'roles'=>['Admin','Manager','Reviewer','Viewer']],
-    ['icon'=>'bi-file-earmark-text','label'=>'Documentos',  'href'=>'documents.php', 'key'=>'documents', 'roles'=>['Admin','Manager','Reviewer','Viewer']],
-    ['icon'=>'bi-shield-check',    'label'=>'Auditoría',    'href'=>'audit.php',     'key'=>'audit',     'roles'=>['Admin','Manager','Reviewer']],
-    ['icon'=>'bi-graph-up',        'label'=>'Reportes',     'href'=>'#',             'key'=>'reports',   'roles'=>['Admin','Manager']],
-    ['icon'=>'bi-people-fill',     'label'=>'Usuarios',     'href'=>'#',             'key'=>'users',     'roles'=>['Admin']],
-    ['icon'=>'bi-gear-fill',       'label'=>'Configuración','href'=>'#',             'key'=>'settings',  'roles'=>['Admin']],
+    ['icon'=>'bi-speedometer2',     'label'=>'Dashboard',    'href'=>'dashboard.php',  'key'=>'dashboard'],
+    ['icon'=>'bi-file-earmark-text','label'=>'Documentos',   'href'=>'documents.php',  'key'=>'documents'],
+    ['icon'=>'bi-shield-check',     'label'=>'Auditoría',    'href'=>'audit.php',      'key'=>'audit'],
+    ['icon'=>'bi-graph-up',         'label'=>'Reportes',     'href'=>'#',              'key'=>'reports'],
+    ['icon'=>'bi-people-fill',      'label'=>'Usuarios',     'href'=>'usuarios.php',   'key'=>'users'],
+    ['icon'=>'bi-gear-fill',        'label'=>'Configuración','href'=>'#',              'key'=>'settings'],
 ];
 
 $svcList = [
-    ['label'=>'App .NET',      'check'=>DOTNET_API.'/health', 'href'=>'/',          'icon'=>'bi-filetype-cs'],
-    ['label'=>'Portal PHP',    'check'=>null,                  'href'=>'index.php',  'icon'=>'bi-filetype-php'],
-    ['label'=>'Búsqueda',      'check'=>SEARCH_API.'/health',  'href'=>'#',          'icon'=>'bi-search'],
-    ['label'=>'Auditoría (PG)','check'=>null,                  'href'=>'audit.php',  'icon'=>'bi-database-fill'],
+    ['label'=>'App .NET',      'check'=>DOTNET_API.'/health', 'href'=>'/',         'icon'=>'bi-filetype-cs'],
+    ['label'=>'Portal PHP',    'check'=>null,                  'href'=>'index.php', 'icon'=>'bi-filetype-php'],
+    ['label'=>'Búsqueda',      'check'=>SEARCH_API.'/health',  'href'=>'#',         'icon'=>'bi-search'],
+    ['label'=>'Auditoría (PG)','check'=>null,                  'href'=>'audit.php', 'icon'=>'bi-database-fill'],
 ];
 
 $pageTitles = [
-    'dashboard' => ['icon'=>'bi-speedometer2', 'label'=>'Dashboard'],
-    'documents' => ['icon'=>'bi-file-earmark-text','label'=>'Documentos'],
-    'audit'     => ['icon'=>'bi-shield-check', 'label'=>'Auditoría'],
-    'reports'   => ['icon'=>'bi-graph-up',     'label'=>'Reportes'],
-    'users'     => ['icon'=>'bi-people-fill',  'label'=>'Usuarios'],
-    'settings'  => ['icon'=>'bi-gear-fill',    'label'=>'Configuración'],
+    'dashboard' => ['icon'=>'bi-speedometer2',      'label'=>'Dashboard'],
+    'documents' => ['icon'=>'bi-file-earmark-text', 'label'=>'Documentos'],
+    'audit'     => ['icon'=>'bi-shield-check',      'label'=>'Auditoría'],
+    'reports'   => ['icon'=>'bi-graph-up',           'label'=>'Reportes'],
+    'users'     => ['icon'=>'bi-people-fill',        'label'=>'Usuarios'],
+    'settings'  => ['icon'=>'bi-gear-fill',          'label'=>'Configuración'],
 ];
-$pt = $pageTitles[$currentPage] ?? ['icon'=>'bi-circle','label'=>ucfirst($currentPage)];
+
+$pt          = $pageTitles[$currentPage] ?? ['icon'=>'bi-circle','label'=>ucfirst($currentPage)];
+$allowedKeys = $roleCan[$role] ?? ['dashboard','documents'];
+
+// Etiqueta y color del badge de rol
+$roleDisplay = [
+    'SUPER_ADMIN'   => ['bg:#dc2626','SÚPER ADMIN'],
+    'COMPANY_ADMIN' => ['bg:#4f8ef7','ADMIN EMP.'],
+    'OPERATOR'      => ['bg:#f59e0b','OPERADOR'],
+    'CONTRIBUTOR'   => ['bg:#06b6d4','CONTRIBUIDOR'],
+    'COMMENTER'     => ['bg:#6b7280','COMENTADOR'],
+    'VIEWER'        => ['bg:#374151','LECTOR'],
+];
+[$roleBgStyle, $roleLabel] = $roleDisplay[$role] ?? ['bg:#374151', $role];
+$displayName = $user['name'] ?? $user['username'] ?? 'Usuario';
 ?>
 <!-- ══════════════════════════════════════════════════════ SIDEBAR ══ -->
 <nav id="sidebar">
@@ -44,17 +69,24 @@ $pt = $pageTitles[$currentPage] ?? ['icon'=>'bi-circle','label'=>ucfirst($curren
     </div>
 
     <div class="sidebar-user">
-        <div class="user-avatar"><?= strtoupper(substr($user['username'] ?? 'U', 0, 1)) ?></div>
-        <div>
-            <div class="user-name"><?= htmlspecialchars($user['username'] ?? '') ?></div>
-            <div class="user-role"><?= htmlspecialchars($role) ?> · <?= htmlspecialchars($user['department'] ?? '') ?></div>
+        <div class="user-avatar"><?= strtoupper(substr($displayName, 0, 1)) ?></div>
+        <div style="min-width:0">
+            <div class="user-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                <?= htmlspecialchars($displayName) ?>
+            </div>
+            <div class="user-role mt-1">
+                <span style="font-size:.65rem;padding:1px 7px;border-radius:99px;font-weight:700;
+                             background:<?= $roleBgStyle ?>;color:#fff;letter-spacing:.04em">
+                    <?= $roleLabel ?>
+                </span>
+            </div>
         </div>
     </div>
 
     <div class="sidebar-section">Navegación</div>
     <nav>
         <?php foreach ($navItems as $item):
-            if (!in_array($role, $item['roles'])) continue;
+            if (!in_array($item['key'], $allowedKeys)) continue;
             $isActive = ($item['key'] === $currentPage); ?>
         <a href="<?= $item['href'] ?>" class="nav-item-link <?= $isActive ? 'active' : '' ?>">
             <i class="bi <?= $item['icon'] ?>"></i>
@@ -109,3 +141,4 @@ $pt = $pageTitles[$currentPage] ?? ['icon'=>'bi-circle','label'=>ucfirst($curren
         </span>
         <span class="text-muted small d-none d-md-inline"><?= date('d M Y, H:i') ?></span>
     </div>
+</header>

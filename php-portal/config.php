@@ -36,6 +36,21 @@ function callSearchApi(string $path): array {
     return json_decode($raw, true) ?? [];
 }
 
+// ── Llamada al Search Service filtrando por empresa (multiempresa) ────────────
+// Agrega automáticamente companyId del usuario en sesión a todos los requests
+// de búsqueda para aislar documentos por empresa.
+function callSearchApiForCompany(string $path): array {
+    $user      = getSessionUser();
+    $companyId = $user['companyId'] ?? null;
+
+    if ($companyId !== null) {
+        $separator = str_contains($path, '?') ? '&' : '?';
+        $path .= $separator . 'companyId=' . urlencode((string)$companyId);
+    }
+
+    return callSearchApi($path);
+}
+
 // ── Llamada al API .NET (autenticación, etc.) ─────────────────────────────────
 function callDotNetApi(string $path, string $method = 'GET', array $body = [], string $token = ''): array {
     $opts = [
@@ -140,4 +155,11 @@ function formatSize(int $bytes): string {
     if ($bytes < 1024)       return "{$bytes} B";
     if ($bytes < 1048576)    return round($bytes / 1024, 1) . ' KB';
     return round($bytes / 1048576, 1) . ' MB';
+}
+
+// ── Truncar texto para preview ────────────────────────────────────────────────
+function truncateText(string $text, int $maxChars = 160): string {
+    $text = trim(preg_replace('/\s+/', ' ', $text));
+    if (mb_strlen($text) <= $maxChars) return htmlspecialchars($text);
+    return htmlspecialchars(mb_substr($text, 0, $maxChars)) . '…';
 }

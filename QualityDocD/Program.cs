@@ -83,7 +83,7 @@ using (var scope = app.Services.CreateScope())
     }
     catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 2714)
     {
-        // Las tablas ya existen sin historial de migraciones — se puede continuar
+        // Las tablas ya existen sin historial de migraciones
     }
 
     if (!await db.Users.AnyAsync())

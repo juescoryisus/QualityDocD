@@ -1,6 +1,6 @@
 ﻿<?php
 // =============================================================================
-// QualityDoc Portal — Documentos (con sidebar compartida)
+// QualityDoc Portal — Documentos (Aprobados + Obsoletos, búsqueda por texto)
 // =============================================================================
 require_once 'config.php';
 requireLogin();
@@ -15,27 +15,27 @@ try { getPgConnection(); $pgOk = true; } catch (Exception $e) {}
 
 $query    = trim($_GET['q']        ?? '');
 $category = trim($_GET['category'] ?? '');
+$status   = trim($_GET['status']   ?? '');   // '' = Approved + Obsolete
 $results  = [];
 $total    = 0;
 $error    = null;
 
-$categoriesData = callSearchApi('/api/categories');
+// Las categorías también se filtran por empresa (multiempresa)
+$categoriesData = callSearchApiForCompany('/api/categories');
 $categories     = $categoriesData['categories'] ?? [];
 
-if ($query !== '' || $category !== '') {
-    $path = '/api/search?q=' . urlencode($query);
-    if ($category !== '') $path .= '&category=' . urlencode($category);
-    $path .= '&status=Approved';
-    $data    = callSearchApi($path);
-    $results = $data['results'] ?? [];
-    $total   = $data['total']   ?? count($results);
-    if (empty($data) && ($query !== '' || $category !== ''))
-        $error = 'El servicio de búsqueda no está disponible.';
-} else {
-    $data    = callSearchApi('/api/search?q=&status=Approved');
-    $results = $data['results'] ?? [];
-    $total   = $data['total']   ?? count($results);
-}
+// Construir path de búsqueda
+$path = '/api/search?q=' . urlencode($query);
+if ($category !== '') $path .= '&category=' . urlencode($category);
+if ($status   !== '') $path .= '&status='   . urlencode($status);
+// Sin filtro de status → el search-service devuelve Approved + Obsolete por defecto
+
+$data    = callSearchApiForCompany($path);
+$results = $data['results'] ?? [];
+$total   = $data['total']   ?? count($results);
+
+if (empty($data) && ($query !== '' || $category !== '' || $status !== ''))
+    $error = 'El servicio de búsqueda no está disponible.';
 
 $currentPage = 'documents';
 ?>
@@ -75,9 +75,13 @@ $currentPage = 'documents';
         #main { margin-left:var(--sidebar-w); margin-top:var(--topbar-h); padding:28px 28px 40px; min-height:calc(100vh - var(--topbar-h)); }
         .hub-card { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden; }
         .hub-card-header { padding:14px 18px; border-bottom:1px solid rgba(255,255,255,.07); display:flex; align-items:center; gap:8px; font-size:.85rem; font-weight:600; color:#c8d0e0; }
-        .doc-card { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:18px; transition:border-color .2s, transform .2s; height:100%; }
+        .doc-card { background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:18px; transition:border-color .2s, transform .2s; height:100%; display:flex; flex-direction:column; }
         .doc-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+        .doc-card.obsolete { border-color:rgba(107,114,128,.3); opacity:.82; }
+        .doc-card.obsolete:hover { border-color:#6b7280; }
         .tag-pill { font-size:.68rem; background:rgba(255,255,255,.06); color:#9ca3af; border:1px solid rgba(255,255,255,.08); border-radius:99px; padding:2px 8px; }
+        .content-snippet { font-size:.75rem; color:#6b7280; line-height:1.5; margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,.05); flex-grow:1; }
+        .version-badge { font-size:.68rem; background:rgba(79,142,247,.12); color:#4f8ef7; border:1px solid rgba(79,142,247,.2); border-radius:6px; padding:1px 7px; }
         @media(max-width:768px){ #sidebar{transform:translateX(-100%);} #sidebar.open{transform:translateX(0);} #topbar,#main{left:0;margin-left:0;} }
     </style>
 </head>
@@ -87,8 +91,11 @@ $currentPage = 'documents';
 <main id="main">
 
     <div class="mb-4">
-        <h5 class="fw-bold text-white mb-1">Documentos Aprobados</h5>
-        <p class="text-muted small mb-0">Búsqueda indexada en <strong>MongoDB</strong> via microservicio Node.js</p>
+        <h5 class="fw-bold text-white mb-1">Documentos</h5>
+        <p class="text-muted small mb-0">
+            Búsqueda indexada en <strong>MongoDB</strong> — busca por título, etiquetas o
+            <strong>texto dentro del documento</strong>
+        </p>
     </div>
 
     <!-- Búsqueda -->
@@ -98,19 +105,27 @@ $currentPage = 'documents';
         </div>
         <div class="p-3">
             <form method="get" action="documents.php" class="row g-2 align-items-end">
-                <div class="col-md-6">
-                    <label class="form-label small fw-semibold mb-1" style="color:#9ca3af;">Búsqueda</label>
+
+                <!-- Texto libre -->
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold mb-1" style="color:#9ca3af;">
+                        Búsqueda
+                    </label>
                     <div class="input-group">
                         <span class="input-group-text bg-dark border-secondary" style="color:#6b7280;">
                             <i class="bi bi-search"></i>
                         </span>
                         <input type="text" name="q" class="form-control bg-dark border-secondary text-light"
-                               placeholder="Título, código, descripción, etiquetas..."
+                               placeholder="Título, código, texto del documento, etiquetas…"
                                value="<?= htmlspecialchars($query) ?>">
                     </div>
                 </div>
-                <div class="col-md-4">
-                    <label class="form-label small fw-semibold mb-1" style="color:#9ca3af;">Categoría</label>
+
+                <!-- Categoría -->
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold mb-1" style="color:#9ca3af;">
+                        Categoría
+                    </label>
                     <select name="category" class="form-select bg-dark border-secondary text-light">
                         <option value="">Todas las categorías</option>
                         <?php foreach ($categories as $cat): ?>
@@ -120,16 +135,33 @@ $currentPage = 'documents';
                         <?php endforeach; ?>
                     </select>
                 </div>
+
+                <!-- Estado -->
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold mb-1" style="color:#9ca3af;">
+                        Estado
+                    </label>
+                    <select name="status" class="form-select bg-dark border-secondary text-light">
+                        <option value=""      <?= $status===''        ?'selected':'' ?>>Aprobados + Obsoletos</option>
+                        <option value="Approved" <?= $status==='Approved'?'selected':'' ?>>Solo Aprobados</option>
+                        <option value="Obsolete" <?= $status==='Obsolete'?'selected':'' ?>>Solo Obsoletos</option>
+                    </select>
+                </div>
+
+                <!-- Botones -->
                 <div class="col-md-2 d-flex gap-2">
                     <button type="submit" class="btn btn-primary flex-grow-1">
                         <i class="bi bi-search me-1"></i>Buscar
                     </button>
-                    <?php if ($query || $category): ?>
-                    <a href="documents.php" class="btn" style="background:rgba(255,255,255,.06);color:#9ca3af;border:1px solid rgba(255,255,255,.1);" title="Limpiar">
+                    <?php if ($query || $category || $status): ?>
+                    <a href="documents.php" class="btn"
+                       style="background:rgba(255,255,255,.06);color:#9ca3af;border:1px solid rgba(255,255,255,.1);"
+                       title="Limpiar filtros">
                         <i class="bi bi-x"></i>
                     </a>
                     <?php endif; ?>
                 </div>
+
             </form>
         </div>
     </div>
@@ -148,10 +180,9 @@ $currentPage = 'documents';
             <i class="bi bi-files me-1"></i>
             <?= $total ?> documento<?= $total!==1?'s':'' ?> encontrado<?= $total!==1?'s':'' ?>
         </span>
-        <?php if ($query || $category): ?>
-        <div style="font-size:.78rem;color:#9ca3af;">
+        <div style="font-size:.78rem;color:#9ca3af;display:flex;gap:6px;flex-wrap:wrap;">
             <?php if ($query): ?>
-            <span style="background:rgba(79,142,247,.15);color:#4f8ef7;padding:2px 8px;border-radius:99px;margin-right:4px;">
+            <span style="background:rgba(79,142,247,.15);color:#4f8ef7;padding:2px 8px;border-radius:99px;">
                 <i class="bi bi-search me-1"></i><?= htmlspecialchars($query) ?>
             </span>
             <?php endif; ?>
@@ -160,8 +191,12 @@ $currentPage = 'documents';
                 <i class="bi bi-folder me-1"></i><?= htmlspecialchars($category) ?>
             </span>
             <?php endif; ?>
+            <?php if ($status): ?>
+            <span style="background:rgba(107,114,128,.15);color:#9ca3af;padding:2px 8px;border-radius:99px;">
+                <i class="bi bi-funnel me-1"></i><?= htmlspecialchars($status) ?>
+            </span>
+            <?php endif; ?>
         </div>
-        <?php endif; ?>
     </div>
 
     <!-- Resultados -->
@@ -169,30 +204,47 @@ $currentPage = 'documents';
     <div class="hub-card p-5 text-center" style="color:#6b7280;">
         <i class="bi bi-inbox fs-1 d-block mb-3 opacity-25"></i>
         <div class="fw-semibold mb-1">No hay documentos disponibles</div>
-        <small>Los documentos deben estar en estado <strong>Aprobado</strong> para aparecer aquí.</small>
+        <small>Prueba con otras palabras clave o cambia el filtro de estado.</small>
     </div>
     <?php else: ?>
     <div class="row g-3">
-        <?php foreach ($results as $doc): ?>
+        <?php foreach ($results as $doc):
+            $isObsolete = ($doc['status'] ?? '') === 'Obsolete';
+        ?>
         <div class="col-md-6 col-xl-4">
-            <div class="doc-card">
-                <div class="d-flex align-items-start justify-content-between mb-2">
-                    <span class="font-monospace" style="font-size:.72rem;background:rgba(255,255,255,.06);color:#9ca3af;padding:2px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);">
-                        <?= htmlspecialchars($doc['code'] ?? '—') ?>
-                    </span>
+            <div class="doc-card <?= $isObsolete ? 'obsolete' : '' ?>">
+
+                <!-- Encabezado: código + estado + versión -->
+                <div class="d-flex align-items-start justify-content-between mb-2 gap-2">
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <?php if (!empty($doc['code'])): ?>
+                        <span class="font-monospace"
+                              style="font-size:.72rem;background:rgba(255,255,255,.06);color:#9ca3af;
+                                     padding:2px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.08);">
+                            <?= htmlspecialchars($doc['code']) ?>
+                        </span>
+                        <?php endif; ?>
+                        <?php if (!empty($doc['version'])): ?>
+                        <span class="version-badge">v<?= htmlspecialchars($doc['version']) ?></span>
+                        <?php endif; ?>
+                    </div>
                     <?= statusBadge($doc['status'] ?? 'Approved') ?>
                 </div>
 
+                <!-- Título + icono de formato -->
                 <div class="d-flex align-items-start gap-2 mb-2">
                     <?php if (!empty($doc['fileExtension'])): ?>
                     <span class="fs-5 flex-shrink-0"><?= extIcon($doc['fileExtension']) ?></span>
+                    <?php elseif (!empty($doc['format'])): ?>
+                    <span class="fs-5 flex-shrink-0"><?= extIcon('.' . ltrim($doc['format'], '.')) ?></span>
                     <?php endif; ?>
                     <div class="fw-semibold" style="color:#e0e2ea;line-height:1.3;">
                         <?= htmlspecialchars($doc['title'] ?? 'Sin título') ?>
                     </div>
                 </div>
 
-                <div class="small mb-3" style="color:#6b7280;">
+                <!-- Metadatos: categoría, norma, tamaño -->
+                <div class="small mb-2" style="color:#6b7280;">
                     <?php if (!empty($doc['category'])): ?>
                     <i class="bi bi-folder me-1"></i><?= htmlspecialchars($doc['category']) ?>
                     <?php endif; ?>
@@ -202,15 +254,29 @@ $currentPage = 'documents';
                     <?php if (!empty($doc['fileSize'])): ?>
                     &nbsp;·&nbsp;<i class="bi bi-hdd me-1"></i><?= formatSize((int)$doc['fileSize']) ?>
                     <?php endif; ?>
+                    <?php if (!empty($doc['approvedAt'])): ?>
+                    &nbsp;·&nbsp;<i class="bi bi-calendar-check me-1"></i>
+                    <?= date('d/m/Y', strtotime($doc['approvedAt'])) ?>
+                    <?php endif; ?>
                 </div>
 
+                <!-- Etiquetas (tags) -->
                 <?php if (!empty($doc['tags'])): ?>
-                <div>
+                <div class="mb-2">
                     <?php foreach ((array)$doc['tags'] as $tag): ?>
                     <span class="tag-pill me-1 mb-1 d-inline-block"><?= htmlspecialchars($tag) ?></span>
                     <?php endforeach; ?>
                 </div>
                 <?php endif; ?>
+
+                <!-- Extracto del texto del documento (contentText) -->
+                <?php if (!empty($doc['contentText'])): ?>
+                <div class="content-snippet">
+                    <i class="bi bi-file-text me-1" style="color:#4b5563;"></i>
+                    <?= truncateText($doc['contentText'], 180) ?>
+                </div>
+                <?php endif; ?>
+
             </div>
         </div>
         <?php endforeach; ?>

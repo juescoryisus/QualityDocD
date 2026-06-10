@@ -1,37 +1,62 @@
-﻿'use strict';
+﻿"use strict";
 
-const express      = require('express');
-const router       = express.Router();
-const DocumentMeta = require('../models/DocumentMeta');
+const express = require("express");
+const router = express.Router();
+const DocumentMeta = require("../models/DocumentMeta");
 
-// ── GET /api/search?q=&category=&status=&limit= ───────────────────────────────
-router.get('/search', async (req, res) => {
+// ── GET /api/search?q=&category=&status=&companyId=&limit= ───────────────────
+// Parámetros:
+//   q          — texto libre (busca en título, contentText, tags, descripción)
+//   category   — filtrar por categoría exacta
+//   status     — filtrar por estado ('Approved', 'Obsolete', etc.)
+//                Si se omite, muestra Approved y Obsolete por defecto
+//   companyId  — filtrar por empresa (multiempresa)
+//   limit      — máximo de resultados (default 50)
+router.get("/search", async (req, res) => {
   try {
-    const { q, category, status, limit = 50 } = req.query;
+    const { q, category, status, companyId, limit = 50 } = req.query;
     const filter = {};
 
     if (q && q.trim()) filter.$text = { $search: q.trim() };
-    if (category)       filter.category = category;
-    if (status)         filter.status   = status;
+    if (category) filter.category = category;
 
-    const projection = q && q.trim() ? { score: { $meta: 'textScore' } } : {};
-    const sort       = q && q.trim() ? { score: { $meta: 'textScore' } } : { updatedAt: -1 };
+    // Filtro de estado: si se especifica uno se aplica directo;
+    // si no se especifica, se muestran Approved y Obsolete (según requerimiento)
+    if (status) {
+      filter.status = status;
+    } else {
+      filter.status = { $in: ["Approved", "Obsolete"] };
+    }
 
-    const docs = await DocumentMeta
-      .find(filter, projection)
+    // Filtrado por empresa (multiempresa): si se proporciona companyId
+    // solo se devuelven documentos de esa empresa
+    if (companyId && !isNaN(Number(companyId))) {
+      filter.companyId = Number(companyId);
+    }
+
+    const projection = q && q.trim() ? { score: { $meta: "textScore" } } : {};
+    const sort =
+      q && q.trim() ? { score: { $meta: "textScore" } } : { updatedAt: -1 };
+
+    const docs = await DocumentMeta.find(filter, projection)
       .sort(sort)
       .limit(Number(limit));
 
-    res.json({ ok: true, total: docs.length, query: q || '', results: docs });
+    res.json({ ok: true, total: docs.length, query: q || "", results: docs });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
 
 // ── GET /api/categories — lista de categorías únicas ─────────────────────────
-router.get('/categories', async (_req, res) => {
+router.get("/categories", async (req, res) => {
   try {
-    const categories = await DocumentMeta.distinct('category');
+    const { companyId } = req.query;
+    const filter = {};
+    if (companyId && !isNaN(Number(companyId))) {
+      filter.companyId = Number(companyId);
+    }
+    const categories = await DocumentMeta.distinct("category", filter);
     res.json({ ok: true, categories: categories.filter(Boolean).sort() });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -39,10 +64,12 @@ router.get('/categories', async (_req, res) => {
 });
 
 // ── GET /api/documents/:documentId — obtener metadatos de un documento ────────
-router.get('/documents/:documentId', async (req, res) => {
+router.get("/documents/:documentId", async (req, res) => {
   try {
-    const doc = await DocumentMeta.findOne({ documentId: Number(req.params.documentId) });
-    if (!doc) return res.status(404).json({ ok: false, error: 'Not found' });
+    const doc = await DocumentMeta.findOne({
+      documentId: Number(req.params.documentId),
+    });
+    if (!doc) return res.status(404).json({ ok: false, error: "Not found" });
     res.json({ ok: true, document: doc });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -50,38 +77,60 @@ router.get('/documents/:documentId', async (req, res) => {
 });
 
 // ── POST /api/documents — indexar o actualizar un documento ───────────────────
-router.post('/documents', async (req, res) => {
+router.post("/documents", async (req, res) => {
   try {
     const {
-      documentId, code, title, description,
-      category, standard, tags, fileExtension,
-      status, isPublic,
+      documentId,
+      versionId,
+      companyId,
+      code,
+      title,
+      description,
+      category,
+      standard,
+      tags,
+      fileExtension,
+      format,
+      version,
+      contentText,
+      status,
+      isPublic,
     } = req.body;
 
-    if (!documentId || !code || !title) {
-      return res.status(400).json({ ok: false, error: 'documentId, code y title son obligatorios.' });
+    if (!documentId || !title) {
+      return res
+        .status(400)
+        .json({ ok: false, error: "documentId y title son obligatorios." });
     }
 
     const parsedTags = Array.isArray(tags)
       ? tags
-      : (tags || '').split(',').map(t => t.trim()).filter(Boolean);
+      : (tags || "")
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean);
 
     const meta = await DocumentMeta.findOneAndUpdate(
       { documentId },
       {
         documentId,
-        code,
+        versionId: versionId || null,
+        companyId: companyId || null,
+        code: code || "",
         title,
-        description:   description   || '',
-        category:      category       || '',
-        standard:      standard       || '',
-        tags:          parsedTags,
-        fileExtension: fileExtension  || '',
-        status:        status         || 'Draft',
-        isPublic:      !!isPublic,
-        updatedAt:     new Date(),
+        description: description || "",
+        category: category || "",
+        standard: standard || "",
+        tags: parsedTags,
+        fileExtension: fileExtension || "",
+        format: format || "",
+        version: version || "",
+        contentText: contentText || "",
+        status: status || "Draft",
+        isPublic: !!isPublic,
+        updatedAt: new Date(),
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     res.status(201).json({ ok: true, id: meta._id });
@@ -91,7 +140,7 @@ router.post('/documents', async (req, res) => {
 });
 
 // ── DELETE /api/documents/:documentId — eliminar del índice ──────────────────
-router.delete('/documents/:documentId', async (req, res) => {
+router.delete("/documents/:documentId", async (req, res) => {
   try {
     await DocumentMeta.deleteOne({ documentId: Number(req.params.documentId) });
     res.json({ ok: true });

@@ -17,17 +17,31 @@ db.createUser({
 db.createCollection('document_metadata');
 
 db.document_metadata.createIndex({ documentId: 1 }, { unique: true, name: 'idx_documentId' });
-db.document_metadata.createIndex({ code:        1 }, { unique: true, name: 'idx_code'       });
-db.document_metadata.createIndex({ category:    1 },                { name: 'idx_category'  });
-db.document_metadata.createIndex({ tags:        1 },                { name: 'idx_tags'      });
-db.document_metadata.createIndex({ status:      1 },                { name: 'idx_status'    });
+db.document_metadata.createIndex({ companyId:  1 },                { name: 'idx_companyId' });
+db.document_metadata.createIndex({ category:   1 },                { name: 'idx_category'  });
+db.document_metadata.createIndex({ tags:       1 },                { name: 'idx_tags'      });
+db.document_metadata.createIndex({ status:     1 },                { name: 'idx_status'    });
 
 // Índice full-text con pesos por campo
+// contentText (peso 8) permite buscar por el texto real extraído del PDF/Word
+// tags (peso 5) para búsqueda por etiquetas
 db.document_metadata.createIndex(
-  { title: 'text', description: 'text', tags: 'text', standard: 'text' },
+  {
+    title:       'text',
+    contentText: 'text',
+    tags:        'text',
+    description: 'text',
+    standard:    'text',
+  },
   {
     name:    'idx_fulltext',
-    weights: { title: 10, tags: 5, standard: 3, description: 1 }
+    weights: {
+      title:       10,
+      contentText:  8,
+      tags:         5,
+      standard:     3,
+      description:  1,
+    }
   }
 );
 

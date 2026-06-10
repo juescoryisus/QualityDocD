@@ -54,17 +54,19 @@ router.post("/documents", requireAuth, requireModuleAccess("MODULE_2"), async (r
     })
     .returning();
 
+  // Las versiones arrancan en 0.1 (pre-release/borrador inicial)
+  // Al aprobarse por primera vez se promueven automáticamente a 1.0
   const [version] = await (db.insert(documentVersionsTable) as any)
     .values({
       documentId: doc.id,
       companyId,
-      majorVersion: 1,
-      minorVersion: 0,
-      versionNumber: "1.0",
+      majorVersion:  0,
+      minorVersion:  1,
+      versionNumber: "0.1",
       status: "draft",
-      contentUrl: parsed.data.contentUrl ?? null,
+      contentUrl:  parsed.data.contentUrl ?? null,
       contentText: parsed.data.contentText,
-      createdBy: userId,
+      createdBy:   userId,
     })
     .returning();
 
@@ -124,17 +126,31 @@ router.post("/documents/:id/versions", requireAuth, requireModuleAccess("MODULE_
     .where(and(eq(documentsTable.id, id), eq(documentsTable.companyId, companyId)));
   if (!doc) { res.status(404).json({ error: "Document not found" }); return; }
 
-  const allVersions    = await db.select().from(documentVersionsTable).where(eq(documentVersionsTable.documentId, id));
-  const latestMajor    = Math.max(...allVersions.map((v) => v.majorVersion), 1);
-  const latestMinor    = allVersions.filter((v) => v.majorVersion === latestMajor).reduce((m, v) => Math.max(m, v.minorVersion), 0);
-  const bumpMajor      = parsed.data.bumpMajor ?? false;
-  const newMajor       = bumpMajor ? latestMajor + 1 : latestMajor;
-  const newMinor       = bumpMajor ? 0 : latestMinor + 1;
+  const allVersions = await db.select().from(documentVersionsTable).where(eq(documentVersionsTable.documentId, id));
+
+  // Soporte correcto para versionado 0.x → 1.0 → 1.x → 2.0
+  // El Math.max base es 0 (no 1) para no saltar el rango 0.x
+  const latestMajor = Math.max(...allVersions.map((v) => v.majorVersion), 0);
+  const latestMinor = allVersions
+    .filter((v) => v.majorVersion === latestMajor)
+    .reduce((m, v) => Math.max(m, v.minorVersion), 0);
+
+  const bumpMajor = parsed.data.bumpMajor ?? false;
+  const newMajor  = bumpMajor ? latestMajor + 1 : latestMajor;
+  const newMinor  = bumpMajor ? 0              : latestMinor + 1;
 
   const [version] = await (db.insert(documentVersionsTable) as any)
-    .values({ documentId: id, companyId, majorVersion: newMajor, minorVersion: newMinor,
-      versionNumber: `${newMajor}.${newMinor}`, status: "draft",
-      contentUrl: parsed.data.contentUrl ?? null, contentText: parsed.data.contentText, createdBy: userId })
+    .values({
+      documentId:    id,
+      companyId,
+      majorVersion:  newMajor,
+      minorVersion:  newMinor,
+      versionNumber: `${newMajor}.${newMinor}`,
+      status: "draft",
+      contentUrl:  parsed.data.contentUrl ?? null,
+      contentText: parsed.data.contentText,
+      createdBy:   userId,
+    })
     .returning();
 
   res.status(201).json(version);
@@ -162,12 +178,28 @@ router.post(
 
     if (!version) { res.status(404).json({ error: "Version not found" }); return; }
 
+    // Marcar versión actual como obsoleta
     await (db.update(documentVersionsTable) as any)
       .set({ status: "obsolete" })
       .where(and(eq(documentVersionsTable.documentId, docId), eq(documentVersionsTable.status, "current")));
 
+    // Regla de promoción de versión:
+    // Si la versión que se aprueba es pre-release (0.x) → se promueve a 1.0
+    // Si ya es >= 1.0 → mantiene su número de versión asignado
+    const isPreRelease   = version.majorVersion === 0;
+    const promotedMajor  = isPreRelease ? 1 : version.majorVersion;
+    const promotedMinor  = isPreRelease ? 0 : version.minorVersion;
+    const promotedNumber = isPreRelease ? "1.0" : version.versionNumber;
+
     const [approved] = await (db.update(documentVersionsTable) as any)
-      .set({ status: "current", approvedBy: userId, approvedAt: new Date() })
+      .set({
+        status:        "current",
+        majorVersion:  promotedMajor,
+        minorVersion:  promotedMinor,
+        versionNumber: promotedNumber,
+        approvedBy:    userId,
+        approvedAt:    new Date(),
+      })
       .where(eq(documentVersionsTable.id, versionId))
       .returning();
 
@@ -191,14 +223,17 @@ router.post(
         await mongo.collection("document_metadata").updateOne(
           { documentId: docId },
           { $set: {
-            documentId: docId, versionId, companyId,
-            title: doc?.title ?? "",
-            format: doc?.format ?? "pdf",
-            version: approved.versionNumber,
-            status: "Approved",
+            documentId:  docId,
+            versionId,
+            companyId,
+            title:       doc?.title ?? "",
+            format:      doc?.format ?? "pdf",
+            version:     approved.versionNumber,
+            status:      "Approved",
+            // contentText se indexa en MongoDB para permitir búsqueda full-text
             contentText: version.contentText ?? "",
-            tags: (doc?.title ?? "").toLowerCase().split(" "),
-            approvedAt: new Date(),
+            tags:        (doc?.title ?? "").toLowerCase().split(" ").filter(Boolean),
+            approvedAt:  new Date(),
           }},
           { upsert: true }
         );
@@ -207,7 +242,7 @@ router.post(
       }
     })();
 
-    logger.info({ documentId: docId, versionId, companyId }, "Document version approved");
+    logger.info({ documentId: docId, versionId, companyId, version: promotedNumber }, "Document version approved");
     res.json(approved);
   }
 );

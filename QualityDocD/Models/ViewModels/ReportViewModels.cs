@@ -22,13 +22,20 @@ public class ComplianceRow
     public DateTime? LastApproved { get; set; }
 }
 
-// ── Log de auditoría ─────────────────────────────────────────────────────────
 public class AuditReportViewModel
 {
+    // Paginación
     public int TotalCount { get; set; }
     public int Page { get; set; }
     public int PageSize { get; set; }
-    public int TotalPages => (int)Math.Ceiling((double)TotalCount / PageSize);
+
+    // Filtros activos
+    public string? FilterAction { get; set; }
+    public string? FilterUser { get; set; }
+    public string? FilterDocument { get; set; }
+    public string? FilterDateFrom { get; set; }
+    public string? FilterDateTo { get; set; }
+
     public List<AuditReportRow> Logs { get; set; } = new();
 }
 
@@ -43,6 +50,7 @@ public class AuditReportRow
     public string? IpAddress { get; set; }
     public DateTime CreatedAt { get; set; }
 }
+
 
 // ── Búsqueda MongoDB ──────────────────────────────────────────────────────────
 public class SearchResultViewModel

@@ -27,9 +27,19 @@ public class ReportsController : Controller
     }
 
     // GET /Reports/Audit
-    public async Task<IActionResult> Audit(int page = 1, int pageSize = 25)
+    public async Task<IActionResult> Audit(
+      int page = 1,
+      int pageSize = 25,
+      string? filterAction = null,
+      string? filterUser = null,
+      string? filterDocument = null,
+      string? filterDateFrom = null,
+      string? filterDateTo = null)
     {
-        var vm = await _svc.GetAuditReportAsync(page, pageSize);
+        var vm = await _svc.GetAuditReportAsync(
+            page, pageSize,
+            filterAction, filterUser, filterDocument,
+            filterDateFrom, filterDateTo);
         return View(vm);
     }
 

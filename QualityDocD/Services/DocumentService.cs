@@ -816,7 +816,13 @@ public class DocumentService
 
     // ── Reporte de auditoría ──────────────────────────────────────────────────
 
-    public async Task<AuditReportViewModel> GetAuditReportAsync(int page, int pageSize)
+    public async Task<AuditReportViewModel> GetAuditReportAsync(
+    int page, int pageSize,
+    string? filterAction = null,
+    string? filterUser = null,
+    string? filterDocument = null,
+    string? filterDateFrom = null,
+    string? filterDateTo = null)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 10, 100);
@@ -824,16 +830,46 @@ public class DocumentService
         var query = _sql.AuditLogs
             .Include(l => l.Document)
             .Include(l => l.User)
-            .OrderByDescending(l => l.CreatedAt);
+            .AsQueryable();
 
+        // ── Filtros ───────────────────────────────────────────────────────────
+        if (!string.IsNullOrWhiteSpace(filterAction))
+            query = query.Where(l => l.Action == filterAction);
+
+        if (!string.IsNullOrWhiteSpace(filterUser))
+            query = query.Where(l => l.User != null &&
+                l.User.Username.Contains(filterUser));
+
+        if (!string.IsNullOrWhiteSpace(filterDocument))
+            query = query.Where(l => l.Document.Code.Contains(filterDocument) ||
+                                     l.Document.Title.Contains(filterDocument));
+
+        if (!string.IsNullOrWhiteSpace(filterDateFrom) &&
+            DateTime.TryParse(filterDateFrom, out var dateFrom))
+            query = query.Where(l => l.CreatedAt >= dateFrom.ToUniversalTime());
+
+        if (!string.IsNullOrWhiteSpace(filterDateTo) &&
+            DateTime.TryParse(filterDateTo, out var dateTo))
+            query = query.Where(l => l.CreatedAt <= dateTo.AddDays(1).ToUniversalTime());
+
+        // ── Paginación ────────────────────────────────────────────────────────
         var total = await query.CountAsync();
-        var logs = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+        var logs = await query
+            .OrderByDescending(l => l.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
 
         return new AuditReportViewModel
         {
             TotalCount = total,
             Page = page,
             PageSize = pageSize,
+            FilterAction = filterAction,
+            FilterUser = filterUser,
+            FilterDocument = filterDocument,
+            FilterDateFrom = filterDateFrom,
+            FilterDateTo = filterDateTo,
             Logs = logs.Select(l => new AuditReportRow
             {
                 Action = l.Action,

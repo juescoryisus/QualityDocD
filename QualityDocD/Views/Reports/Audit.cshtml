@@ -1,89 +1,215 @@
 ﻿@model QualityDocD.Models.ViewModels.AuditReportViewModel
+@using QualityDocD.Extensions
 @{
     ViewData["Title"] = "Log de Auditoría";
+    int totalPages = (int)Math.Ceiling((double)Model.TotalCount / Model.PageSize);
 }
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h4 class="fw-bold mb-0">
-        <i class="bi bi-journal-text me-2 text-secondary"></i>Log de Auditoría
+        <i class="bi bi-journal-text me-2 text-primary"></i>Log de Auditoría
     </h4>
     <span class="badge bg-secondary fs-6">@Model.TotalCount registros</span>
 </div>
 
-<div class="card border-0 shadow-sm">
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-hover table-sm align-middle mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>Fecha/Hora</th>
-                        <th>Acción</th>
-                        <th>Documento</th>
-                        <th>Usuario</th>
-                        <th>Antes</th>
-                        <th>Después</th>
-                        <th>IP</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var log in Model.Logs)
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body py-3">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold mb-1">Desde</label>
+                <input type="date" name="filterDateFrom" value="@Model.FilterDateFrom"
+                       class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold mb-1">Hasta</label>
+                <input type="date" name="filterDateTo" value="@Model.FilterDateTo"
+                       class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold mb-1">Acción</label>
+                <select name="filterAction" class="form-select form-select-sm">
+                    <option value="">— Todas —</option>
+                    @foreach (var a in new[] {
+                        "Created","Updated","StatusChange","ApprovalAssigned",
+                        "Approved","Downloaded","Deleted"
+                    })
                     {
-                        <tr>
-                            <td class="text-muted small text-nowrap">
-                                @log.CreatedAt.ToString("dd/MM/yyyy HH:mm")
-                            </td>
-                            <td>
-                                @{
-                                    var (ic, cls) = log.Action switch
-                                    {
-                                        "Created" => ("bi-file-plus", "text-success"),
-                                        "Updated" => ("bi-pencil", "text-warning"),
-                                        "StatusChange" => ("bi-arrow-left-right", "text-primary"),
-                                        "Downloaded" => ("bi-download", "text-info"),
-                                        _ => ("bi-circle", "text-muted"),
-                                    };
-                                }
-                                <i class="bi @ic @cls me-1"></i>
-                                <span class="small">@log.Action</span>
-                            </td>
-                            <td>
-                                <span class="badge bg-light text-dark border font-monospace small">
-                                    @log.DocumentCode
-                                </span>
-                                <span class="small text-muted ms-1">@log.DocumentTitle</span>
-                            </td>
-                            <td class="small">@(log.Username ?? "—")</td>
-                            <td class="small text-muted">@(log.OldValue ?? "—")</td>
-                            <td class="small">@(log.NewValue ?? "—")</td>
-                            <td class="small text-muted">@(log.IpAddress ?? "—")</td>
-                        </tr>
+                        <option value="@a" selected="@(Model.FilterAction == a)">@a</option>
                     }
-                    @if (!Model.Logs.Any())
-                    {
-                        <tr>
-                            <td colspan="7" class="text-center text-muted py-4">
-                                Sin registros de auditoría
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold mb-1">Usuario</label>
+                <input type="text" name="filterUser" value="@Model.FilterUser"
+                       class="form-control form-control-sm"
+                       placeholder="Nombre de usuario..." />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold mb-1">Documento</label>
+                <input type="text" name="filterDocument" value="@Model.FilterDocument"
+                       class="form-control form-control-sm"
+                       placeholder="Código o título..." />
+            </div>
+            <div class="col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-primary btn-sm flex-grow-1">
+                    <i class="bi bi-funnel me-1"></i>Filtrar
+                </button>
+                <a href="/Reports/Audit" class="btn btn-outline-secondary btn-sm"
+                   title="Limpiar filtros">
+                    <i class="bi bi-x-lg"></i>
+                </a>
+            </div>
+            <input type="hidden" name="pageSize" value="@Model.PageSize" />
+        </form>
     </div>
 </div>
 
-@if (Model.TotalPages > 1)
-{
-    <nav class="mt-3 d-flex justify-content-center">
-        <ul class="pagination pagination-sm">
-            @for (int p = 1; p <= Model.TotalPages; p++)
-            {
-                <li class="page-item @(p == Model.Page ? "active" : "")">
-                    <a class="page-link" asp-action="Audit"
-                       asp-route-page="@p"
-                       asp-route-pageSize="@Model.PageSize">@p</a>
-                </li>
-            }
-        </ul>
-    </nav>
+@{
+    var hayFiltros = !string.IsNullOrEmpty(Model.FilterAction)
+                  || !string.IsNullOrEmpty(Model.FilterUser)
+                  || !string.IsNullOrEmpty(Model.FilterDocument)
+                  || !string.IsNullOrEmpty(Model.FilterDateFrom)
+                  || !string.IsNullOrEmpty(Model.FilterDateTo);
 }
+@if (hayFiltros)
+{
+    <div class="alert alert-info py-2 small mb-3">
+        <i class="bi bi-funnel-fill me-1"></i>
+        Filtros activos:
+        @if (!string.IsNullOrEmpty(Model.FilterDateFrom))
+        {
+            <span class="badge bg-info text-dark me-1">Desde: @Model.FilterDateFrom</span>
+        }
+        @if (!string.IsNullOrEmpty(Model.FilterDateTo))
+        {
+            <span class="badge bg-info text-dark me-1">Hasta: @Model.FilterDateTo</span>
+        }
+        @if (!string.IsNullOrEmpty(Model.FilterAction))
+        {
+            <span class="badge bg-info text-dark me-1">Acción: @Model.FilterAction</span>
+        }
+        @if (!string.IsNullOrEmpty(Model.FilterUser))
+        {
+            <span class="badge bg-info text-dark me-1">Usuario: @Model.FilterUser</span>
+        }
+        @if (!string.IsNullOrEmpty(Model.FilterDocument))
+        {
+            <span class="badge bg-info text-dark me-1">Doc: @Model.FilterDocument</span>
+        }
+        — mostrando <strong>@Model.TotalCount</strong> registro(s)
+    </div>
+}
+
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-sm table-hover mb-0 align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>FECHA/HORA</th>
+                    <th>ACCIÓN</th>
+                    <th>DOCUMENTO</th>
+                    <th>USUARIO</th>
+                    <th>ANTES</th>
+                    <th>DESPUÉS</th>
+                    <th>IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in Model.Logs)
+                {
+                    <tr>
+                        <td class="text-nowrap text-muted small">
+                            @l.CreatedAt.ToMexicoString()
+                        </td>
+                        <td>
+                            @{
+                                var (icon, color) = l.Action switch
+                                {
+                                    "Created" => ("bi-plus-circle", "text-success"),
+                                    "Updated" => ("bi-pencil", "text-warning"),
+                                    "StatusChange" => ("bi-arrow-left-right", "text-primary"),
+                                    "ApprovalAssigned" => ("bi-person-check", "text-info"),
+                                    "Approved" => ("bi-check-circle", "text-success"),
+                                    "Downloaded" => ("bi-download", "text-secondary"),
+                                    _ => ("bi-circle", "text-muted"),
+                                };
+                            }
+                            <i class="bi @icon @color me-1"></i>
+                            <span class="small">@l.Action</span>
+                        </td>
+                        <td>
+                            <span class="badge bg-light text-dark border font-monospace small me-1">
+                                @l.DocumentCode
+                            </span>
+                            <span class="small text-muted">@l.DocumentTitle</span>
+                        </td>
+                        <td class="small">@(l.Username ?? "—")</td>
+                        <td class="small text-muted">@(l.OldValue ?? "—")</td>
+                        <td class="small">@(l.NewValue ?? "—")</td>
+                        <td class="small text-muted font-monospace">
+                            @(l.IpAddress ?? "—")
+                        </td>
+                    </tr>
+                }
+                @if (!Model.Logs.Any())
+                {
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-4">
+                            <i class="bi bi-search fs-4 d-block mb-2"></i>
+                            No se encontraron registros con los filtros aplicados.
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (totalPages > 1)
+    {
+        <div class="card-footer bg-white d-flex justify-content-between align-items-center py-2">
+            <span class="small text-muted">
+                Página @Model.Page de @totalPages
+                (@Model.TotalCount registros totales)
+            </span>
+            <nav>
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item @(Model.Page <= 1 ? "disabled" : "")">
+                        <a class="page-link"
+                           href="?page=@(Model.Page - 1)&pageSize=@Model.PageSize
+                            &filterAction=@Model.FilterAction
+                            &filterUser=@Model.FilterUser
+                            &filterDocument=@Model.FilterDocument
+                            &filterDateFrom=@Model.FilterDateFrom
+                            &filterDateTo=@Model.FilterDateTo">
+                            ‹
+                        </a>
+                    </li>
+                    @for (int i = Math.Max(1, Model.Page - 2);
+                              i <= Math.Min(totalPages, Model.Page + 2); i++)
+                    {
+                        <li class="page-item @(i == Model.Page ? "active" : "")">
+                            <a class="page-link"
+                               href="?page=@i&pageSize=@Model.PageSize
+                            &filterAction=@Model.FilterAction
+                            &filterUser=@Model.FilterUser
+                            &filterDocument=@Model.FilterDocument
+                            &filterDateFrom=@Model.FilterDateFrom
+                            &filterDateTo=@Model.FilterDateTo">@i</a>
+                        </li>
+                    }
+                    <li class="page-item @(Model.Page >= totalPages ? "disabled" : "")">
+                        <a class="page-link"
+                           href="?page=@(Model.Page + 1)&pageSize=@Model.PageSize
+                            &filterAction=@Model.FilterAction
+                            &filterUser=@Model.FilterUser
+                            &filterDocument=@Model.FilterDocument
+                            &filterDateFrom=@Model.FilterDateFrom
+                            &filterDateTo=@Model.FilterDateTo">
+                            ›
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+    }
+</div>

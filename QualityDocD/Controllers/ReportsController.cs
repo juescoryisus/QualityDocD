@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using MongoDB.Driver;
 using QualityDocD.Data;
+using QualityDocD.Extensions;
 using QualityDocD.Models.ViewModels;
 using QualityDocD.Services;
 
@@ -110,4 +111,63 @@ public class ReportsController : Controller
         var result = await _svc.ReIndexAllAsync();
         return View("ReIndexResult", result);
     }
+
+    // GET /Reports/ExportAudit  — descarga CSV con los filtros activos
+    [Authorize(Roles = "Admin,Manager")]
+    public async Task<IActionResult> ExportAudit(
+        string? filterAction = null,
+        string? filterUser = null,
+        string? filterDocument = null,
+        string? filterDateFrom = null,
+        string? filterDateTo = null)
+    {
+        var rows = await _svc.ExportAuditAsync(
+            filterAction, filterUser, filterDocument,
+            filterDateFrom, filterDateTo);
+
+        var csv = BuildCsv(rows);
+        var bytes = System.Text.Encoding.UTF8.GetPreamble()  // BOM para que Excel muestre acentos
+            .Concat(System.Text.Encoding.UTF8.GetBytes(csv))
+            .ToArray();
+
+        var fileName = $"auditoria_{DateTime.Now:yyyyMMdd_HHmm}.csv";
+        return File(bytes, "text/csv; charset=utf-8", fileName);
+    }
+
+    // ── Genera el contenido CSV ───────────────────────────────────────────────
+    private static string BuildCsv(List<AuditReportRow> rows)
+    {
+        var sb = new System.Text.StringBuilder();
+
+        // Encabezados
+        sb.AppendLine("Fecha/Hora,Acción,Código,Documento,Usuario,Antes,Después,IP");
+
+        foreach (var r in rows)
+        {
+            // Convierte a hora México antes de exportar
+            var fechaMx = r.CreatedAt.ToMexico().ToString("dd/MM/yyyy HH:mm");
+
+            sb.AppendLine(string.Join(",",
+                CsvField(fechaMx),
+                CsvField(r.Action),
+                CsvField(r.DocumentCode),
+                CsvField(r.DocumentTitle),
+                CsvField(r.Username ?? ""),
+                CsvField(r.OldValue ?? ""),
+                CsvField(r.NewValue ?? ""),
+                CsvField(r.IpAddress ?? "")
+            ));
+        }
+
+        return sb.ToString();
+    }
+
+    // Escapa un campo CSV (envuelve en comillas si tiene coma, comilla o salto de línea)
+    private static string CsvField(string value)
+    {
+        if (value.Contains(',') || value.Contains('"') || value.Contains('\n'))
+            return $"\"{value.Replace("\"", "\"\"")}\"";
+        return value;
+    }
+
 }

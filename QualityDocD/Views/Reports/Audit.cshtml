@@ -9,7 +9,19 @@
     <h4 class="fw-bold mb-0">
         <i class="bi bi-journal-text me-2 text-primary"></i>Log de Auditoría
     </h4>
-    <span class="badge bg-secondary fs-6">@Model.TotalCount registros</span>
+    <div class="d-flex align-items-center gap-2">
+        <span class="badge bg-secondary fs-6">@Model.TotalCount registros</span>
+
+        <a href="/Reports/ExportAudit?filterAction=@Model.FilterAction
+            &filterUser=@Model.FilterUser
+            &filterDocument=@Model.FilterDocument
+            &filterDateFrom=@Model.FilterDateFrom
+            &filterDateTo=@Model.FilterDateTo"
+           class="btn btn-sm btn-outline-success"
+           title="Exportar registros filtrados a CSV (compatible con Excel)">
+            <i class="bi bi-file-earmark-spreadsheet me-1"></i>Exportar CSV
+        </a>
+    </div>
 </div>
 
 <div class="card border-0 shadow-sm mb-4">

@@ -884,6 +884,53 @@ public class DocumentService
         };
     }
 
+    // ── Exportar auditoría (sin límite de paginación) ─────────────────────────
+    public async Task<List<AuditReportRow>> ExportAuditAsync(
+        string? filterAction = null,
+        string? filterUser = null,
+        string? filterDocument = null,
+        string? filterDateFrom = null,
+        string? filterDateTo = null)
+    {
+        var query = _sql.AuditLogs
+            .Include(l => l.Document)
+            .Include(l => l.User)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(filterAction))
+            query = query.Where(l => l.Action == filterAction);
+
+        if (!string.IsNullOrWhiteSpace(filterUser))
+            query = query.Where(l => l.User != null &&
+                l.User.Username.Contains(filterUser));
+
+        if (!string.IsNullOrWhiteSpace(filterDocument))
+            query = query.Where(l => l.Document.Code.Contains(filterDocument) ||
+                                     l.Document.Title.Contains(filterDocument));
+
+        if (!string.IsNullOrWhiteSpace(filterDateFrom) &&
+            DateTime.TryParse(filterDateFrom, out var dateFrom))
+            query = query.Where(l => l.CreatedAt >= dateFrom.ToUniversalTime());
+
+        if (!string.IsNullOrWhiteSpace(filterDateTo) &&
+            DateTime.TryParse(filterDateTo, out var dateTo))
+            query = query.Where(l => l.CreatedAt <= dateTo.AddDays(1).ToUniversalTime());
+
+        var logs = await query.OrderByDescending(l => l.CreatedAt).ToListAsync();
+
+        return logs.Select(l => new AuditReportRow
+        {
+            Action = l.Action,
+            DocumentCode = l.Document.Code,
+            DocumentTitle = l.Document.Title,
+            Username = l.User?.Username,
+            OldValue = l.OldValue,
+            NewValue = l.NewValue,
+            IpAddress = l.IpAddress,
+            CreatedAt = l.CreatedAt,
+        }).ToList();
+    }
+
     // ── Extrae texto de archivos adjuntos para búsqueda ───────────────────────
 
     private async Task<string> ExtractFileTextAsync(string storedFileName)

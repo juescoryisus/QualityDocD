@@ -1,14 +1,16 @@
 import { pgTable, text, serial, timestamp, integer } from "drizzle-orm/pg-core";
 import { companiesTable } from "./companies";
 import { usersTable } from "./users";
+import { documentCategoriesTable } from "./document_categories";  // ← NUEVO
 
 export const documentsTable = pgTable("documents", {
-  id:        serial("id").primaryKey(),
-  companyId: integer("company_id").notNull().references(() => companiesTable.id),
-  title:     text("title").notNull(),
-  format:    text("format").notNull().default("pdf"),
-  createdBy: integer("created_by").notNull().references(() => usersTable.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  id:         serial("id").primaryKey(),
+  companyId:  integer("company_id").notNull().references(() => companiesTable.id),
+  categoryId: integer("category_id").references(() => documentCategoriesTable.id), // ← NUEVO
+  title:      text("title").notNull(),
+  format:     text("format").notNull().default("pdf"),
+  createdBy:  integer("created_by").notNull().references(() => usersTable.id),
+  createdAt:  timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const documentVersionsTable = pgTable("document_versions", {
@@ -18,13 +20,15 @@ export const documentVersionsTable = pgTable("document_versions", {
   majorVersion:  integer("major_version").notNull().default(1),
   minorVersion:  integer("minor_version").notNull().default(0),
   versionNumber: text("version_number").notNull(),
-  status:        text("status", { enum: ["draft", "current", "obsolete"] }).notNull().default("draft"),
-  contentUrl:    text("content_url"),
-  contentText:   text("content_text"),
-  approvedBy:    integer("approved_by").references(() => usersTable.id),
-  approvedAt:    timestamp("approved_at", { withTimezone: true }),
-  createdBy:     integer("created_by").notNull().references(() => usersTable.id),
-  createdAt:     timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  status: text("status", {
+    enum: ["draft", "under_review", "approved", "obsolete"],  // ← NUEVO: under_review y approved
+  }).notNull().default("draft"),
+  contentUrl:  text("content_url"),
+  contentText: text("content_text"),
+  approvedBy:  integer("approved_by").references(() => usersTable.id),
+  approvedAt:  timestamp("approved_at", { withTimezone: true }),
+  createdBy:   integer("created_by").notNull().references(() => usersTable.id),
+  createdAt:   timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export type InsertDocument        = typeof documentsTable.$inferInsert;

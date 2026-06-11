@@ -1,4 +1,4 @@
-﻿"use strict";
+"use strict";
 
 const express = require("express");
 const router = express.Router();
@@ -10,7 +10,6 @@ const DocumentMeta = require("../models/DocumentMeta");
 //   category   — filtrar por categoría exacta
 //   status     — filtrar por estado ('Approved', 'Obsolete', etc.)
 //                Si se omite, muestra Approved y Obsolete por defecto
-//   companyId  — filtrar por empresa (multiempresa)
 //   limit      — máximo de resultados (default 50)
 router.get("/search", async (req, res) => {
   try {
@@ -28,7 +27,6 @@ router.get("/search", async (req, res) => {
       filter.status = { $in: ["Approved", "Obsolete"] };
     }
 
-    // Filtrado por empresa (multiempresa): si se proporciona companyId
     // solo se devuelven documentos de esa empresa
     if (companyId && !isNaN(Number(companyId))) {
       filter.companyId = Number(companyId);

@@ -1,0 +1,66 @@
+﻿@model QualityDocD.Models.ViewModels.ReIndexResultViewModel
+@{
+    ViewData["Title"] = "Resultado de re-indexación";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4">
+    <h2><i class="bi bi-check2-circle"></i> Re-indexación completada</h2>
+
+    <div class="row mt-4 g-3">
+        <div class="col-md-3">
+            <div class="card text-center border-secondary">
+                <div class="card-body">
+                    <h1 class="display-5">@Model.Total</h1>
+                    <p class="text-muted mb-0">Total procesados</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-success">
+                <div class="card-body">
+                    <h1 class="display-5 text-success">@Model.Ok</h1>
+                    <p class="text-muted mb-0">Con texto extraído</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-warning">
+                <div class="card-body">
+                    <h1 class="display-5 text-warning">@Model.Skipped</h1>
+                    <p class="text-muted mb-0">Sin archivo / no soportado</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center border-danger">
+                <div class="card-body">
+                    <h1 class="display-5 text-danger">@Model.Failed</h1>
+                    <p class="text-muted mb-0">Con errores</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (Model.Errors.Count > 0)
+    {
+        <div class="mt-4">
+            <h5 class="text-danger">Errores encontrados</h5>
+            <div class="bg-light border rounded p-3" style="max-height:300px; overflow-y:auto; font-size:0.85rem; font-family:monospace;">
+                @foreach (var e in Model.Errors)
+                {
+                    <div>@e</div>
+                }
+            </div>
+        </div>
+    }
+
+    <div class="mt-4">
+        <a href="/Reports/Search" class="btn btn-primary">
+            <i class="bi bi-search"></i> Ir a Búsqueda Avanzada
+        </a>
+        <a href="/Reports/ReIndex" class="btn btn-outline-secondary ms-2">
+            Volver a re-indexar
+        </a>
+    </div>
+</div>

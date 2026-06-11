@@ -54,8 +54,8 @@ router.post("/documents", requireAuth, requireModuleAccess("MODULE_2"), async (r
     })
     .returning();
 
-  // Las versiones arrancan en 0.1 (pre-release/borrador inicial)
-  // Al aprobarse por primera vez se promueven automáticamente a 1.0
+  // Las versiones arrancan en 0.1 (borrador inicial)
+  // Al aprobarse → número entero: 0.x → 1, 1.x → 2, 2.x → 3...
   const [version] = await (db.insert(documentVersionsTable) as any)
     .values({
       documentId: doc.id,
@@ -128,7 +128,7 @@ router.post("/documents/:id/versions", requireAuth, requireModuleAccess("MODULE_
 
   const allVersions = await db.select().from(documentVersionsTable).where(eq(documentVersionsTable.documentId, id));
 
-  // Soporte correcto para versionado 0.x → 1.0 → 1.x → 2.0
+  // Versionado: borradores en decimal (0.1, 1.1, 2.1...), aprobados en entero (1, 2, 3...)
   // El Math.max base es 0 (no 1) para no saltar el rango 0.x
   const latestMajor = Math.max(...allVersions.map((v) => v.majorVersion), 0);
   const latestMinor = allVersions
@@ -183,13 +183,11 @@ router.post(
       .set({ status: "obsolete" })
       .where(and(eq(documentVersionsTable.documentId, docId), eq(documentVersionsTable.status, "current")));
 
-    // Regla de promoción de versión:
-    // Si la versión que se aprueba es pre-release (0.x) → se promueve a 1.0
-    // Si ya es >= 1.0 → mantiene su número de versión asignado
-    const isPreRelease   = version.majorVersion === 0;
-    const promotedMajor  = isPreRelease ? 1 : version.majorVersion;
-    const promotedMinor  = isPreRelease ? 0 : version.minorVersion;
-    const promotedNumber = isPreRelease ? "1.0" : version.versionNumber;
+    // Al aprobar cualquier versión decimal X.Y → número entero X+1
+    // Ejemplos: 0.1 → 1, 0.3 → 1, 1.1 → 2, 1.4 → 2, 2.1 → 3
+    const promotedMajor  = version.majorVersion + 1;
+    const promotedMinor  = 0;
+    const promotedNumber = String(promotedMajor);
 
     const [approved] = await (db.update(documentVersionsTable) as any)
       .set({
@@ -230,7 +228,6 @@ router.post(
             format:      doc?.format ?? "pdf",
             version:     approved.versionNumber,
             status:      "Approved",
-            // contentText se indexa en MongoDB para permitir búsqueda full-text
             contentText: version.contentText ?? "",
             tags:        (doc?.title ?? "").toLowerCase().split(" ").filter(Boolean),
             approvedAt:  new Date(),

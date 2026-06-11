@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using System.Text;
 using System.Text.Json;
+using MongoDB.Driver;
 using QualityDocD.Data;
 using QualityDocD.Models.Domain;
 using QualityDocD.Models.ViewModels;
@@ -15,19 +16,25 @@ public class DocumentService
     private readonly IHttpContextAccessor _http;
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<DocumentService> _log;
+    private readonly MongoDbContext _mongo;        // ← NUEVO
 
     private static readonly HashSet<string> AllowedExtensions =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ".pdf",".docx",".doc",".xlsx",".xls",".pptx",".ppt",
-            ".png",".jpg",".jpeg",".gif",".tif",".tiff",
-            ".dwg",".dxf",".step",".stp",".iges",
-            ".txt",".csv",".zip",".7z"
+            ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
+            ".png", ".jpg", ".jpeg", ".gif", ".tif", ".tiff",
+            ".dwg", ".dxf", ".step", ".stp", ".iges",
+            ".txt", ".csv", ".zip", ".7z"
         };
 
-    public DocumentService(AppDbContext sql, AuditDbContext pg,
-        IWebHostEnvironment env, IHttpContextAccessor http,
-        IHttpClientFactory httpFactory, ILogger<DocumentService> log)
+    public DocumentService(
+        AppDbContext sql,
+        AuditDbContext pg,
+        IWebHostEnvironment env,
+        IHttpContextAccessor http,
+        IHttpClientFactory httpFactory,
+        ILogger<DocumentService> log,
+        MongoDbContext mongo)                                  // ← NUEVO
     {
         _sql = sql;
         _pg = pg;
@@ -35,6 +42,7 @@ public class DocumentService
         _http = http;
         _httpFactory = httpFactory;
         _log = log;
+        _mongo = mongo;                                   // ← NUEVO
     }
 
     // ── Consultas ─────────────────────────────────────────────────────────────
@@ -87,7 +95,12 @@ public class DocumentService
             .Where(u => u.IsActive
                      && (u.Role == "Reviewer" || u.Role == "Manager")
                      && u.Id != doc.CreatedByUserId)
-            .Select(u => new UserSelectItem { Id = u.Id, Username = u.Username, Department = u.Department })
+            .Select(u => new UserSelectItem
+            {
+                Id = u.Id,
+                Username = u.Username,
+                Department = u.Department
+            })
             .ToListAsync();
 
         return new DocumentDetailViewModel
@@ -114,7 +127,7 @@ public class DocumentService
                 .Select(a => new ApprovalRowViewModel
                 {
                     Id = a.Id,
-                    ReviewerId = a.ReviewerId,          // ← necesario para el panel de revisión
+                    ReviewerId = a.ReviewerId,
                     ReviewerName = a.Reviewer.Username,
                     Order = a.ApprovalOrder,
                     Status = a.Status.ToString(),
@@ -218,8 +231,6 @@ public class DocumentService
     }
 
     // ── Enviar a revisión ─────────────────────────────────────────────────────
-    // ✅ REEMPLAZA el SubmitForReviewAsync original.
-    // Ahora soporta:  Draft → UnderReview  y  PendingChanges → UnderSecondReview
 
     public async Task<(bool ok, string? error)> SubmitForReviewAsync(
         SubmitReviewViewModel form, int userId)
@@ -239,7 +250,6 @@ public class DocumentService
         var oldStatus = doc.Status.ToString();
         var isSecondRound = doc.Status == DocumentStatus.PendingChanges;
 
-        // En segunda ronda, limpiar aprobaciones previas
         if (isSecondRound)
             _sql.DocumentApprovals.RemoveRange(doc.Approvals);
 
@@ -263,8 +273,6 @@ public class DocumentService
     }
 
     // ── Aprobar ───────────────────────────────────────────────────────────────
-    // ✅ REEMPLAZA ProcessApprovalAsync (action = "approve").
-    // Detecta automáticamente cuando todos los revisores han aprobado.
 
     public async Task<(bool ok, string? error)> ApproveAsync(
         int documentId, int reviewerId, string? comments)
@@ -289,8 +297,6 @@ public class DocumentService
         approval.ReviewedAt = DateTime.UtcNow;
 
         var oldStatus = doc.Status.ToString();
-
-        // ¿Todos los revisores han aprobado ya?
         var allApproved = doc.Approvals
             .Where(a => a.Id != approval.Id)
             .All(a => a.Status == ApprovalStatus.Approved);
@@ -314,8 +320,7 @@ public class DocumentService
         return (true, null);
     }
 
-    // ── Solicitar cambios (estado intermedio nuevo) ───────────────────────────
-    // ✅ NUEVO — no existía en el servicio original.
+    // ── Solicitar cambios ─────────────────────────────────────────────────────
 
     public async Task<(bool ok, string? error)> RequestChangesAsync(
         int documentId, int reviewerId, string comments)
@@ -352,9 +357,7 @@ public class DocumentService
         return (true, null);
     }
 
-    // ── Rechazar definitivamente ──────────────────────────────────────────────
-    // ✅ REEMPLAZA ProcessApprovalAsync (action = "reject").
-    // El documento pasa a Rejected (no vuelve a Draft como antes).
+    // ── Rechazar ──────────────────────────────────────────────────────────────
 
     public async Task<(bool ok, string? error)> RejectAsync(
         int documentId, int reviewerId, string comments)
@@ -393,9 +396,6 @@ public class DocumentService
     }
 
     // ── Marcar obsoleto ───────────────────────────────────────────────────────
-    // ✅ REEMPLAZA MarkObsoleteAsync original.
-    // Cambia el tipo de retorno de bool a (bool ok, string? error)
-    // para ser consistente con el DocumentsController.
 
     public async Task<(bool ok, string? error)> MarkObsoleteAsync(int id, int userId)
     {
@@ -430,53 +430,250 @@ public class DocumentService
         return (new FileStream(path, FileMode.Open, FileAccess.Read), doc.OriginalFileName, ct);
     }
 
-    // ── Búsqueda — llama al microservicio Node.js ─────────────────────────────
+
+    // ── Vista previa de archivo ────────────────────────────────────────────────
+    public async Task<FilePreviewViewModel?> PreviewAsync(int id)
+    {
+        var doc = await _sql.Documents.FindAsync(id);
+        if (doc == null || string.IsNullOrEmpty(doc.StoredFileName)) return null;
+
+        var path = Path.Combine(GetUploadPath(), doc.StoredFileName);
+        if (!File.Exists(path)) return null;
+
+        var ext = doc.FileExtension?.ToLowerInvariant() ?? string.Empty;
+
+        // PDF — devolver stream para iframe
+        if (ext == ".pdf")
+        {
+            return new FilePreviewViewModel
+            {
+                DocumentId = doc.Id,
+                Title = doc.Title,
+                OriginalFileName = doc.OriginalFileName,
+                FileExtension = ext,
+                PreviewType = "pdf",
+            };
+        }
+
+        // TXT / CSV — leer texto
+        if (ext is ".txt" or ".csv")
+        {
+            var text = await File.ReadAllTextAsync(path);
+            return new FilePreviewViewModel
+            {
+                DocumentId = doc.Id,
+                Title = doc.Title,
+                OriginalFileName = doc.OriginalFileName,
+                FileExtension = ext,
+                PreviewType = "text",
+                TextContent = text,
+            };
+        }
+
+        // DOCX — convertir a HTML básico
+        if (ext == ".docx")
+        {
+            var html = ConvertDocxToHtml(path);
+            return new FilePreviewViewModel
+            {
+                DocumentId = doc.Id,
+                Title = doc.Title,
+                OriginalFileName = doc.OriginalFileName,
+                FileExtension = ext,
+                PreviewType = "docx",
+                HtmlContent = html,
+            };
+        }
+
+        // Formato sin vista previa
+        return new FilePreviewViewModel
+        {
+            DocumentId = doc.Id,
+            Title = doc.Title,
+            OriginalFileName = doc.OriginalFileName,
+            FileExtension = ext,
+            PreviewType = "unsupported",
+        };
+    }
+
+    // ── Sirve el archivo raw para el <iframe> del PDF ─────────────────────────
+    public async Task<(Stream stream, string contentType)?> GetFileStreamAsync(int id)
+    {
+        var doc = await _sql.Documents.FindAsync(id);
+        if (doc == null || string.IsNullOrEmpty(doc.StoredFileName)) return null;
+
+        var path = Path.Combine(GetUploadPath(), doc.StoredFileName);
+        if (!File.Exists(path)) return null;
+
+        var ct = string.IsNullOrEmpty(doc.ContentType) ? "application/octet-stream" : doc.ContentType;
+        return (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read), ct);
+    }
+
+    // ── Convierte DOCX a HTML legible (párrafos, negrita, listas) ─────────────
+    private static string ConvertDocxToHtml(string path)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<div class=\"docx-preview\">");
+
+        using var wordDoc = DocumentFormat.OpenXml.Packaging
+            .WordprocessingDocument.Open(path, false);
+        var body = wordDoc.MainDocumentPart?.Document?.Body;
+        if (body == null) return "<p class=\"text-muted\">No se pudo leer el documento.</p>";
+
+        foreach (var element in body.ChildElements)
+        {
+            if (element is DocumentFormat.OpenXml.Wordprocessing.Paragraph para)
+            {
+                // Estilo del párrafo (headings)
+                var style = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value ?? "";
+                var tag = style switch
+                {
+                    "Heading1" or "1" => "h4",
+                    "Heading2" or "2" => "h5",
+                    "Heading3" or "3" => "h6",
+                    _ => "p"
+                };
+
+                var lineHtml = new StringBuilder();
+                foreach (var run in para.Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>())
+                {
+                    var bold = run.RunProperties?.Bold != null;
+                    var italic = run.RunProperties?.Italic != null;
+                    var text = System.Web.HttpUtility.HtmlEncode(
+                        string.Concat(run.Descendants<DocumentFormat.OpenXml.Wordprocessing.Text>()
+                            .Select(t => t.Text)));
+
+                    if (string.IsNullOrEmpty(text)) continue;
+                    if (bold && italic) lineHtml.Append($"<strong><em>{text}</em></strong>");
+                    else if (bold) lineHtml.Append($"<strong>{text}</strong>");
+                    else if (italic) lineHtml.Append($"<em>{text}</em>");
+                    else lineHtml.Append(text);
+                }
+
+                var content = lineHtml.ToString();
+                if (string.IsNullOrWhiteSpace(content))
+                    sb.Append("<br/>");
+                else
+                    sb.Append($"<{tag} class=\"docx-para\">{content}</{tag}>");
+            }
+            else if (element is DocumentFormat.OpenXml.Wordprocessing.Table table)
+            {
+                sb.Append("<table class=\"table table-bordered table-sm docx-table\">");
+                foreach (var row in table.Descendants<DocumentFormat.OpenXml.Wordprocessing.TableRow>())
+                {
+                    sb.Append("<tr>");
+                    foreach (var cell in row.Descendants<DocumentFormat.OpenXml.Wordprocessing.TableCell>())
+                    {
+                        var cellText = System.Web.HttpUtility.HtmlEncode(
+                            string.Concat(cell.Descendants<DocumentFormat.OpenXml.Wordprocessing.Text>()
+                                .Select(t => t.Text)));
+                        sb.Append($"<td>{cellText}</td>");
+                    }
+                    sb.Append("</tr>");
+                }
+                sb.Append("</table>");
+            }
+        }
+
+        sb.Append("</div>");
+        return sb.ToString();
+    }
+
+
+    // ── Búsqueda ──────────────────────────────────────────────────────────────
 
     public async Task<SearchResultViewModel> SearchAsync(
         string query, string? category, string? status)
     {
+        // Intentar búsqueda MongoDB directa (incluye fileContent)
+        try
+        {
+            var filter = string.IsNullOrWhiteSpace(query)
+                ? Builders<DocumentMeta>.Filter.Empty
+                : Builders<DocumentMeta>.Filter.Text(query);
+
+            if (!string.IsNullOrWhiteSpace(category))
+                filter &= Builders<DocumentMeta>.Filter.Eq(d => d.Category, category);
+
+            if (!string.IsNullOrWhiteSpace(status))
+                filter &= Builders<DocumentMeta>.Filter.Eq(d => d.Status, status);
+
+            var mongoDocs = await _mongo.DocumentMetas
+                .Find(filter)
+                .Limit(50)
+                .ToListAsync();
+
+            if (mongoDocs.Count > 0)
+            {
+                return new SearchResultViewModel
+                {
+                    Query = query ?? string.Empty,
+                    Total = mongoDocs.Count,
+                    Results = mongoDocs.Select(d => new SearchResultItem
+                    {
+                        DocumentId = d.DocumentId,
+                        Code = d.Code,
+                        Title = d.Title,
+                        Category = d.Category,
+                        Standard = d.Standard,
+                        Tags = d.Tags,
+                        Status = d.Status,
+                        FileExtension = d.FileExtension,
+                    }).ToList(),
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("MongoDB search falló: {Message}. Usando fallback.", ex.Message);
+        }
+
+        // Fallback: Node.js microservicio
         try
         {
             var client = _httpFactory.CreateClient("SearchService");
-            var url = $"/api/search?q={Uri.EscapeDataString(query ?? "")}";
+            var url = $"/api/search?q={Uri.EscapeDataString(query ?? "")}&mode=all";
             if (!string.IsNullOrWhiteSpace(category))
                 url += $"&category={Uri.EscapeDataString(category)}";
             if (!string.IsNullOrWhiteSpace(status))
                 url += $"&status={Uri.EscapeDataString(status)}";
 
             var response = await client.GetAsync(url);
-            if (!response.IsSuccessStatusCode)
-                return await FallbackSearchAsync(query, category, status);
-
-            var json = await response.Content.ReadAsStringAsync();
-            var result = JsonSerializer.Deserialize<SearchServiceResponse>(json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            return new SearchResultViewModel
+            if (response.IsSuccessStatusCode)
             {
-                Query = query ?? string.Empty,
-                Total = result?.Total ?? 0,
-                Results = result?.Results?.Select(r => new SearchResultItem
-                {
-                    DocumentId = r.DocumentId,
-                    Code = r.Code,
-                    Title = r.Title,
-                    Category = r.Category,
-                    Standard = r.Standard,
-                    Tags = r.Tags ?? new(),
-                    Status = r.Status,
-                    FileExtension = r.FileExtension,
-                }).ToList() ?? new(),
-            };
+                var json = await response.Content.ReadAsStringAsync();
+                var result = JsonSerializer.Deserialize<SearchServiceResponse>(json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                if (result?.Results?.Count > 0)
+                    return new SearchResultViewModel
+                    {
+                        Query = query ?? string.Empty,
+                        Total = result.Total,
+                        Results = result.Results.Select(r => new SearchResultItem
+                        {
+                            DocumentId = r.DocumentId,
+                            Code = r.Code,
+                            Title = r.Title,
+                            Category = r.Category,
+                            Standard = r.Standard,
+                            Tags = r.Tags ?? new(),
+                            Status = r.Status,
+                            FileExtension = r.FileExtension,
+                        }).ToList(),
+                    };
+            }
         }
         catch (Exception ex)
         {
-            _log.LogWarning("Search service no disponible: {Message}. Usando SQL Server.", ex.Message);
-            return await FallbackSearchAsync(query, category, status);
+            _log.LogWarning("Search service no disponible: {Message}.", ex.Message);
         }
+
+        // Último fallback: SQL Server
+        return await FallbackSearchAsync(query, category, status);
     }
 
-    // ── Búsqueda fallback con SQL Server ──────────────────────────────────────
+    // ── Búsqueda fallback SQL Server ──────────────────────────────────────────
 
     private async Task<SearchResultViewModel> FallbackSearchAsync(
         string? query, string? category, string? status)
@@ -510,10 +707,77 @@ public class DocumentService
                 Category = d.Category,
                 Standard = d.Standard,
                 Tags = d.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                    .Select(t => t.Trim()).ToList(),
+                                      .Select(t => t.Trim()).ToList(),
                 Status = d.Status.ToString(),
                 FileExtension = d.FileExtension,
             }).ToList(),
+        };
+    }
+
+    // ── Re-indexación masiva ───────────────────────────────────────────────────────
+    // Recorre todos los documentos en SQL Server, extrae el texto de cada archivo
+    // y actualiza (o crea) su entrada en MongoDB con el campo fileContent.
+    // Solo accesible para Admin. Progreso reportado por retorno.
+
+    public async Task<ReIndexResultViewModel> ReIndexAllAsync(
+        IProgress<string>? progress = null)
+    {
+        var docs = await _sql.Documents
+            .OrderBy(d => d.Id)
+            .ToListAsync();
+
+        int ok = 0, skipped = 0, failed = 0;
+        var errors = new List<string>();
+
+        foreach (var doc in docs)
+        {
+            try
+            {
+                var fileContent = await ExtractFileTextAsync(doc.StoredFileName);
+                var hasFile = !string.IsNullOrEmpty(fileContent);
+
+                var filter = Builders<DocumentMeta>.Filter.Eq(d => d.DocumentId, doc.Id);
+                var update = Builders<DocumentMeta>.Update
+                    .Set(d => d.DocumentId, doc.Id)
+                    .Set(d => d.Code, doc.Code)
+                    .Set(d => d.Title, doc.Title)
+                    .Set(d => d.Description, doc.Description)
+                    .Set(d => d.Category, doc.Category)
+                    .Set(d => d.Standard, doc.Standard)
+                    .Set(d => d.Tags, doc.Tags
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(t => t.Trim()).ToList())
+                    .Set(d => d.FileExtension, doc.FileExtension)
+                    .Set(d => d.Status, doc.Status.ToString())
+                    .Set(d => d.IsPublic, doc.IsPublic)
+                    .Set(d => d.FileContent, fileContent)
+                    .Set(d => d.UpdatedAt, DateTime.UtcNow);
+
+                await _mongo.DocumentMetas.UpdateOneAsync(
+                    filter, update, new UpdateOptions { IsUpsert = true });
+
+                if (hasFile) ok++;
+                else skipped++;
+
+                progress?.Report($"[{doc.Code}] {doc.Title} — {(hasFile ? "texto extraído" : "sin archivo")}");
+            }
+            catch (Exception ex)
+            {
+                failed++;
+                var msg = $"[{doc.Code}] ERROR: {ex.Message}";
+                errors.Add(msg);
+                progress?.Report(msg);
+                _log.LogWarning("ReIndex falló en {Code}: {Msg}", doc.Code, ex.Message);
+            }
+        }
+
+        return new ReIndexResultViewModel
+        {
+            Total = docs.Count,
+            Ok = ok,
+            Skipped = skipped,
+            Failed = failed,
+            Errors = errors,
         };
     }
 
@@ -584,10 +848,57 @@ public class DocumentService
         };
     }
 
-    // ── Sincroniza con microservicio Node.js → MongoDB ────────────────────────
+    // ── Extrae texto de archivos adjuntos para búsqueda ───────────────────────
+
+    private async Task<string> ExtractFileTextAsync(string storedFileName)
+    {
+        if (string.IsNullOrEmpty(storedFileName)) return string.Empty;
+        var path = Path.Combine(GetUploadPath(), storedFileName);
+        if (!File.Exists(path)) return string.Empty;
+
+        var ext = Path.GetExtension(storedFileName).ToLowerInvariant();
+        try
+        {
+            // Texto plano y CSV — lectura directa
+            if (ext is ".txt" or ".csv")
+                return await File.ReadAllTextAsync(path);
+
+            // PDF — requiere NuGet: UglyToad.PdfPig
+            if (ext == ".pdf")
+            {
+                var sb = new StringBuilder();
+                using var pdf = UglyToad.PdfPig.PdfDocument.Open(path);
+                foreach (var page in pdf.GetPages())
+                    sb.AppendLine(string.Concat(page.GetWords().Select(w => w.Text + " ")));
+                return sb.ToString();
+            }
+
+            // DOCX — requiere NuGet: DocumentFormat.OpenXml
+            if (ext == ".docx")
+            {
+                var sb = new StringBuilder();
+                using var docx = DocumentFormat.OpenXml.Packaging
+                    .WordprocessingDocument.Open(path, false);
+                var body = docx.MainDocumentPart?.Document?.Body;
+                if (body != null)
+                    foreach (var text in body.Descendants<DocumentFormat.OpenXml.Wordprocessing.Text>())
+                        sb.Append(text.Text).Append(' ');
+                return sb.ToString();
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("No se pudo extraer texto de {File}: {Msg}", storedFileName, ex.Message);
+        }
+
+        return string.Empty;
+    }
+
+    // ── Sincroniza con MongoDB + microservicio Node.js ────────────────────────
 
     private async Task SyncSearchServiceAsync(Document doc)
     {
+        // 1) Node.js microservicio (como antes)
         try
         {
             var client = _httpFactory.CreateClient("SearchService");
@@ -611,6 +922,36 @@ public class DocumentService
         catch (Exception ex)
         {
             _log.LogWarning("No se pudo sincronizar con Search Service: {Message}", ex.Message);
+        }
+
+        // 2) MongoDB directo — incluye el contenido extraído del archivo
+        try
+        {
+            var fileContent = await ExtractFileTextAsync(doc.StoredFileName);
+
+            var filter = Builders<DocumentMeta>.Filter.Eq(d => d.DocumentId, doc.Id);
+            var update = Builders<DocumentMeta>.Update
+                .Set(d => d.DocumentId, doc.Id)
+                .Set(d => d.Code, doc.Code)
+                .Set(d => d.Title, doc.Title)
+                .Set(d => d.Description, doc.Description)
+                .Set(d => d.Category, doc.Category)
+                .Set(d => d.Standard, doc.Standard)
+                .Set(d => d.Tags, doc.Tags
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(t => t.Trim()).ToList())
+                .Set(d => d.FileExtension, doc.FileExtension)
+                .Set(d => d.Status, doc.Status.ToString())
+                .Set(d => d.IsPublic, doc.IsPublic)
+                .Set(d => d.FileContent, fileContent)
+                .Set(d => d.UpdatedAt, DateTime.UtcNow);
+
+            await _mongo.DocumentMetas.UpdateOneAsync(
+                filter, update, new UpdateOptions { IsUpsert = true });
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("No se pudo sincronizar con MongoDB: {Message}", ex.Message);
         }
     }
 

@@ -1,0 +1,31 @@
+﻿@{
+    ViewData["Title"] = "Re-indexar documentos";
+    Layout = "_Layout";
+}
+
+<div class="container mt-4">
+    <h2><i class="bi bi-arrow-repeat"></i> Re-indexación masiva</h2>
+    <p class="text-muted">
+        Este proceso recorre todos los documentos, extrae el texto de cada archivo adjunto
+        (PDF, DOCX, TXT) y actualiza MongoDB para que la búsqueda avanzada pueda encontrar
+        contenido dentro de los archivos.
+    </p>
+
+    <div class="alert alert-warning">
+        <strong>⚠ Nota:</strong> Dependiendo de la cantidad de documentos, este proceso
+        puede tardar varios minutos. No cierres la ventana hasta que termine.
+    </div>
+
+    <div class="card border-primary">
+        <div class="card-body">
+            <p>¿Estás seguro de que deseas re-indexar <strong>todos los documentos</strong>?</p>
+            <form method="post" asp-action="ReIndex">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-play-fill"></i> Iniciar re-indexación
+                </button>
+                <a href="/Reports/Search" class="btn btn-secondary ms-2">Cancelar</a>
+            </form>
+        </div>
+    </div>
+</div>

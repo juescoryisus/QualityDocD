@@ -170,4 +170,26 @@ public class DocumentsController : Controller
     // ── Helpers ───────────────────────────────────────────────────────────────
     private int GetUserId() =>
         int.Parse(User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier) ?? "0");
+
+
+    // GET /Documents/Preview/5  — página del visor
+    [AllowAnonymous]   // o [Authorize] si quieres restringirlo
+    public async Task<IActionResult> Preview(int id)
+    {
+        var vm = await _svc.PreviewAsync(id);
+        if (vm == null) return NotFound();
+        return View(vm);
+    }
+
+    // GET /Documents/ViewFile/5  — stream del archivo (para <iframe> PDF)
+    public async Task<IActionResult> ViewFile(int id)
+    {
+        var result = await _svc.GetFileStreamAsync(id);
+        if (result == null) return NotFound();
+        var (stream, contentType) = result.Value;
+
+        // Inline = muestra en navegador en vez de descargar
+        Response.Headers["Content-Disposition"] = "inline";
+        return File(stream, contentType);
+    }
 }

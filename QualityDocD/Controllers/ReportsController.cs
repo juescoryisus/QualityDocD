@@ -65,7 +65,7 @@ public class ReportsController : Controller
         return View();
     }
 
-    // GET /Reports/MongoJson/raw  — descarga el archivo JSON
+    // GET /Reports/MongoJson/raw
     [Authorize(Roles = "Admin")]
     [Route("Reports/MongoJson/raw")]
     public async Task<IActionResult> MongoJsonRaw()
@@ -80,5 +80,24 @@ public class ReportsController : Controller
         return File(System.Text.Encoding.UTF8.GetBytes(json),
                     "application/json",
                     $"mongodb-metadata-{DateTime.Now:yyyyMMdd-HHmm}.json");
+    }
+
+    // ── Re-indexación masiva ──────────────────────────────────────────────────
+
+    // GET /Reports/ReIndex  — muestra la página de confirmación
+    [Authorize(Roles = "Admin")]
+    public IActionResult ReIndex()
+    {
+        return View();
+    }
+
+    // POST /Reports/ReIndex  — ejecuta la re-indexación
+    [Authorize(Roles = "Admin")]
+    [HttpPost, ActionName("ReIndex")]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> ReIndexConfirmed()
+    {
+        var result = await _svc.ReIndexAllAsync();
+        return View("ReIndexResult", result);
     }
 }

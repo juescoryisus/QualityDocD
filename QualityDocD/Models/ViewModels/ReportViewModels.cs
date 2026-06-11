@@ -63,3 +63,27 @@ public class SearchResultItem
     public string Status { get; set; } = string.Empty;
     public string FileExtension { get; set; } = string.Empty;
 }
+
+// ── Re-indexación masiva ──────────────────────────────────────────────────────
+public class ReIndexResultViewModel
+{
+    public int Total { get; set; }
+    public int Ok { get; set; }   // documentos con texto extraído
+    public int Skipped { get; set; }   // documentos sin archivo o formato no soportado
+    public int Failed { get; set; }   // errores
+    public List<string> Errors { get; set; } = new();
+}
+
+// ── Vista previa de archivo ───────────────────────────────────────────────
+public class FilePreviewViewModel
+{
+    public int DocumentId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string OriginalFileName { get; set; } = string.Empty;
+    public string FileExtension { get; set; } = string.Empty;
+
+    /// <summary>pdf | text | docx | unsupported</summary>
+    public string PreviewType { get; set; } = string.Empty;
+    public string TextContent { get; set; } = string.Empty;
+    public string HtmlContent { get; set; } = string.Empty;
+}

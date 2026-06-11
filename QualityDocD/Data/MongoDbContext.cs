@@ -66,7 +66,8 @@ public class MongoDbContext
             new CreateIndexModel<DocumentMeta>(
                 keys.Text(d => d.Title)
                     .Text(d => d.Description)
-                    .Text("tags"),
+                    .Text("tags")
+                    .Text("fileContent"),          // ← NUEVO: indexa contenido del archivo
                 new CreateIndexOptions
                 {
                     Name    = "idx_fulltext",
@@ -76,6 +77,7 @@ public class MongoDbContext
                         ["tags"]        = 5,
                         ["standard"]    = 3,
                         ["description"] = 1,
+                        ["fileContent"] = 2,       // ← NUEVO
                     }
                 }),
         };
@@ -128,6 +130,9 @@ public class DocumentMeta
 
     [BsonElement("isPublic")]
     public bool IsPublic { get; set; }
+
+    [BsonElement("fileContent")]
+    public string FileContent { get; set; } = string.Empty;    // ← NUEVO
 
     [BsonElement("createdAt")]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

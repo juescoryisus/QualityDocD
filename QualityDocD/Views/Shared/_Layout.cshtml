@@ -64,7 +64,7 @@
                                 }
                             </ul>
                         </li>
-                        @if (User.IsInRole("Admin"))
+                        @if (User.IsInRole("Admin") || User.IsInRole("SuperAdmin"))
                         {
                             <li class="nav-item">
                                 <a class="nav-link" asp-controller="Auth" asp-action="Register">
@@ -72,6 +72,27 @@
                                 </a>
                             </li>
                         }
+                        @if (User.IsInRole("SuperAdmin"))
+                        {
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                                    <i class="bi bi-building me-1"></i>Empresas
+                                </a>
+                                <ul class="dropdown-menu">
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Companies" asp-action="Index">
+                                            <i class="bi bi-list-ul me-2"></i>Ver todas
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" asp-controller="Companies" asp-action="Create">
+                                            <i class="bi bi-plus-circle me-2"></i>Nueva empresa
+                                        </a>
+                                    </li>
+                                </ul>
+                            </li>
+                        }
+                    }
                     }
                 </ul>
 

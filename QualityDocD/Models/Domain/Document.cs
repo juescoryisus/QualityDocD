@@ -59,6 +59,10 @@ public class Document
     public DateTime? RejectedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }
 
+    // Multi-empresa
+    public int CompanyId { get; set; }
+    public Company Company { get; set; } = null!;
+
     // FK y navegación
     public int CreatedByUserId { get; set; }
     public User CreatedByUser { get; set; } = null!;

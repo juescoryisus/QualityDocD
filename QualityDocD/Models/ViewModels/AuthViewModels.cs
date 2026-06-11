@@ -47,5 +47,10 @@ public class RegisterViewModel
     [Display(Name = "Departamento")]
     public string Department { get; set; } = string.Empty;
 
+    /// <summary>Slug de la empresa a la que se une el nuevo usuario (ej: "empresa-abc").</summary>
+    [Required(ErrorMessage = "El identificador de empresa es obligatorio.")]
+    [Display(Name = "Identificador de empresa")]
+    public string CompanySlug { get; set; } = string.Empty;
+
     public string? Error { get; set; }
 }

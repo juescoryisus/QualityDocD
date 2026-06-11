@@ -5,6 +5,7 @@ using MongoDB.Driver;
 using QualityDocD.Data;
 using QualityDocD.Models.Domain;
 using QualityDocD.Models.ViewModels;
+using System.Security.Claims;
 
 namespace QualityDocD.Services;
 
@@ -16,7 +17,7 @@ public class DocumentService
     private readonly IHttpContextAccessor _http;
     private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<DocumentService> _log;
-    private readonly MongoDbContext _mongo;        // ← NUEVO
+    private readonly MongoDbContext _mongo;
 
     private static readonly HashSet<string> AllowedExtensions =
         new(StringComparer.OrdinalIgnoreCase)
@@ -34,7 +35,7 @@ public class DocumentService
         IHttpContextAccessor http,
         IHttpClientFactory httpFactory,
         ILogger<DocumentService> log,
-        MongoDbContext mongo)                                  // ← NUEVO
+        MongoDbContext mongo)
     {
         _sql = sql;
         _pg = pg;
@@ -42,7 +43,46 @@ public class DocumentService
         _http = http;
         _httpFactory = httpFactory;
         _log = log;
-        _mongo = mongo;                                   // ← NUEVO
+        _mongo = mongo;
+    }
+
+    // ── Helpers de empresa ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Retorna el CompanyId del usuario autenticado desde las claims.
+    /// SuperAdmin retorna 0 (sin filtro de empresa).
+    /// </summary>
+    private int GetCompanyId()
+    {
+        var claim = _http.HttpContext?.User.FindFirstValue("company_id");
+        return int.TryParse(claim, out var id) ? id : 0;
+    }
+
+    private bool IsSuperAdmin() =>
+        _http.HttpContext?.User.IsInRole("SuperAdmin") == true;
+
+    /// <summary>
+    /// Aplica filtro de empresa a una query de documentos.
+    /// SuperAdmin ve todos; los demás solo ven los de su empresa.
+    /// </summary>
+    private IQueryable<Document> ScopeDocuments()
+    {
+        var q = _sql.Documents.AsQueryable();
+        if (!IsSuperAdmin())
+            q = q.Where(d => d.CompanyId == GetCompanyId());
+        return q;
+    }
+
+    /// <summary>
+    /// Aplica filtro de empresa a una query de usuarios.
+    /// SuperAdmin ve todos; los demás solo ven los de su empresa.
+    /// </summary>
+    private IQueryable<User> ScopeUsers()
+    {
+        var q = _sql.Users.AsQueryable();
+        if (!IsSuperAdmin())
+            q = q.Where(u => u.CompanyId == GetCompanyId());
+        return q;
     }
 
     // ── Consultas ─────────────────────────────────────────────────────────────
@@ -50,7 +90,7 @@ public class DocumentService
     public async Task<DocumentIndexViewModel> GetIndexAsync(
         string? status, string? category, string? search)
     {
-        var query = _sql.Documents.Include(d => d.CreatedByUser).AsQueryable();
+        var query = ScopeDocuments().Include(d => d.CreatedByUser).AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(status) &&
             Enum.TryParse<DocumentStatus>(status, out var s))
@@ -66,7 +106,7 @@ public class DocumentService
 
         var docs = await query.OrderByDescending(d => d.CreatedAt).ToListAsync();
 
-        var counts = await _sql.Documents
+        var counts = await ScopeDocuments()
             .GroupBy(d => d.Status)
             .Select(g => new { Status = g.Key.ToString(), Count = g.Count() })
             .ToDictionaryAsync(x => x.Status, x => x.Count);
@@ -83,7 +123,7 @@ public class DocumentService
 
     public async Task<DocumentDetailViewModel?> GetDetailAsync(int id)
     {
-        var doc = await _sql.Documents
+        var doc = await ScopeDocuments()
             .Include(d => d.CreatedByUser)
             .Include(d => d.Approvals).ThenInclude(a => a.Reviewer)
             .Include(d => d.AuditLogs).ThenInclude(l => l.User)
@@ -91,7 +131,7 @@ public class DocumentService
 
         if (doc == null) return null;
 
-        var reviewers = await _sql.Users
+        var reviewers = await ScopeUsers()
             .Where(u => u.IsActive
                      && (u.Role == "Reviewer" || u.Role == "Manager")
                      && u.Id != doc.CreatedByUserId)
@@ -153,6 +193,10 @@ public class DocumentService
     public async Task<(bool ok, string? error, int docId)> CreateAsync(
         DocumentFormViewModel form, int userId)
     {
+        var companyId = GetCompanyId();
+        if (companyId == 0 && !IsSuperAdmin())
+            return (false, "No se pudo determinar la empresa del usuario.", 0);
+
         var uploadPath = GetUploadPath();
         string stored = "", original = "", ext = "", ct = "";
         long size = 0;
@@ -164,8 +208,17 @@ public class DocumentService
             (stored, original, ext, ct, size) = (s, o, e, c, sz);
         }
 
-        var count = await _sql.Documents.CountAsync();
-        var code = $"QD-{count + 1:D4}";
+        // Código único dentro de la empresa: SLUG-NNNN
+        var companySlug = _http.HttpContext?.User.FindFirstValue("company_slug") ?? "QD";
+        var count = await _sql.Documents.CountAsync(d => d.CompanyId == companyId);
+        var code = $"{companySlug.ToUpper()}-{count + 1:D4}";
+
+        // Garantizar unicidad global si hay colisión (raro)
+        while (await _sql.Documents.AnyAsync(d => d.Code == code))
+        {
+            count++;
+            code = $"{companySlug.ToUpper()}-{count + 1:D4}";
+        }
 
         var doc = new Document
         {
@@ -183,6 +236,7 @@ public class DocumentService
             ContentType = ct,
             FileSizeBytes = size,
             CreatedByUserId = userId,
+            CompanyId = companyId,
         };
 
         _sql.Documents.Add(doc);
@@ -200,7 +254,7 @@ public class DocumentService
     public async Task<(bool ok, string? error)> UpdateAsync(
         int id, DocumentFormViewModel form, int userId)
     {
-        var doc = await _sql.Documents.FindAsync(id);
+        var doc = await ScopeDocuments().FirstOrDefaultAsync(d => d.Id == id);
         if (doc == null) return (false, "Documento no encontrado.");
 
         if (form.File != null)
@@ -235,7 +289,7 @@ public class DocumentService
     public async Task<(bool ok, string? error)> SubmitForReviewAsync(
         SubmitReviewViewModel form, int userId)
     {
-        var doc = await _sql.Documents
+        var doc = await ScopeDocuments()
             .Include(d => d.Approvals)
             .FirstOrDefaultAsync(d => d.Id == form.DocumentId);
 
@@ -277,7 +331,7 @@ public class DocumentService
     public async Task<(bool ok, string? error)> ApproveAsync(
         int documentId, int reviewerId, string? comments)
     {
-        var doc = await _sql.Documents
+        var doc = await ScopeDocuments()
             .Include(d => d.Approvals)
             .FirstOrDefaultAsync(d => d.Id == documentId);
 
@@ -325,7 +379,7 @@ public class DocumentService
     public async Task<(bool ok, string? error)> RequestChangesAsync(
         int documentId, int reviewerId, string comments)
     {
-        var doc = await _sql.Documents
+        var doc = await ScopeDocuments()
             .Include(d => d.Approvals)
             .FirstOrDefaultAsync(d => d.Id == documentId);
 
@@ -362,7 +416,7 @@ public class DocumentService
     public async Task<(bool ok, string? error)> RejectAsync(
         int documentId, int reviewerId, string comments)
     {
-        var doc = await _sql.Documents
+        var doc = await ScopeDocuments()
             .Include(d => d.Approvals)
             .FirstOrDefaultAsync(d => d.Id == documentId);
 
@@ -399,7 +453,7 @@ public class DocumentService
 
     public async Task<(bool ok, string? error)> MarkObsoleteAsync(int id, int userId)
     {
-        var doc = await _sql.Documents.FindAsync(id);
+        var doc = await ScopeDocuments().FirstOrDefaultAsync(d => d.Id == id);
         if (doc == null) return (false, "Documento no encontrado.");
         if (doc.Status == DocumentStatus.Obsolete)
             return (false, "El documento ya está marcado como Obsoleto.");
@@ -421,7 +475,7 @@ public class DocumentService
     public async Task<(Stream stream, string fileName, string contentType)?> DownloadAsync(
         int id, int userId)
     {
-        var doc = await _sql.Documents.FindAsync(id);
+        var doc = await ScopeDocuments().FirstOrDefaultAsync(d => d.Id == id);
         if (doc == null || string.IsNullOrEmpty(doc.StoredFileName)) return null;
         var path = Path.Combine(GetUploadPath(), doc.StoredFileName);
         if (!File.Exists(path)) return null;
@@ -430,11 +484,11 @@ public class DocumentService
         return (new FileStream(path, FileMode.Open, FileAccess.Read), doc.OriginalFileName, ct);
     }
 
-
     // ── Vista previa de archivo ────────────────────────────────────────────────
+
     public async Task<FilePreviewViewModel?> PreviewAsync(int id)
     {
-        var doc = await _sql.Documents.FindAsync(id);
+        var doc = await ScopeDocuments().FirstOrDefaultAsync(d => d.Id == id);
         if (doc == null || string.IsNullOrEmpty(doc.StoredFileName)) return null;
 
         var path = Path.Combine(GetUploadPath(), doc.StoredFileName);
@@ -442,7 +496,6 @@ public class DocumentService
 
         var ext = doc.FileExtension?.ToLowerInvariant() ?? string.Empty;
 
-        // PDF — devolver stream para iframe
         if (ext == ".pdf")
         {
             return new FilePreviewViewModel
@@ -455,7 +508,6 @@ public class DocumentService
             };
         }
 
-        // TXT / CSV — leer texto
         if (ext is ".txt" or ".csv")
         {
             var text = await File.ReadAllTextAsync(path);
@@ -470,7 +522,6 @@ public class DocumentService
             };
         }
 
-        // DOCX — convertir a HTML básico
         if (ext == ".docx")
         {
             var html = ConvertDocxToHtml(path);
@@ -485,7 +536,6 @@ public class DocumentService
             };
         }
 
-        // Formato sin vista previa
         return new FilePreviewViewModel
         {
             DocumentId = doc.Id,
@@ -497,9 +547,10 @@ public class DocumentService
     }
 
     // ── Sirve el archivo raw para el <iframe> del PDF ─────────────────────────
+
     public async Task<(Stream stream, string contentType)?> GetFileStreamAsync(int id)
     {
-        var doc = await _sql.Documents.FindAsync(id);
+        var doc = await ScopeDocuments().FirstOrDefaultAsync(d => d.Id == id);
         if (doc == null || string.IsNullOrEmpty(doc.StoredFileName)) return null;
 
         var path = Path.Combine(GetUploadPath(), doc.StoredFileName);
@@ -509,7 +560,8 @@ public class DocumentService
         return (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read), ct);
     }
 
-    // ── Convierte DOCX a HTML legible (párrafos, negrita, listas) ─────────────
+    // ── Convierte DOCX a HTML legible ─────────────────────────────────────────
+
     private static string ConvertDocxToHtml(string path)
     {
         var sb = new StringBuilder();
@@ -524,7 +576,6 @@ public class DocumentService
         {
             if (element is DocumentFormat.OpenXml.Wordprocessing.Paragraph para)
             {
-                // Estilo del párrafo (headings)
                 var style = para.ParagraphProperties?.ParagraphStyleId?.Val?.Value ?? "";
                 var tag = style switch
                 {
@@ -579,24 +630,37 @@ public class DocumentService
         return sb.ToString();
     }
 
-
     // ── Búsqueda ──────────────────────────────────────────────────────────────
 
     public async Task<SearchResultViewModel> SearchAsync(
-        string query, string? category, string? status)
+        string? query, string? category, string? status)
     {
-        // Intentar búsqueda MongoDB directa (incluye fileContent)
+        var companyId = GetCompanyId();
+
         try
         {
-            var filter = string.IsNullOrWhiteSpace(query)
-                ? Builders<DocumentMeta>.Filter.Empty
-                : Builders<DocumentMeta>.Filter.Text(query);
+            var filterBuilder = Builders<DocumentMeta>.Filter;
+            var filter = filterBuilder.Empty;
+
+            if (!IsSuperAdmin() && companyId > 0)
+                filter &= filterBuilder.Eq(d => d.CompanyId, companyId);
+
+            if (!string.IsNullOrWhiteSpace(query))
+            {
+                var textFilter = filterBuilder.Or(
+                    filterBuilder.Regex(d => d.Title, new MongoDB.Bson.BsonRegularExpression(query, "i")),
+                    filterBuilder.Regex(d => d.Description, new MongoDB.Bson.BsonRegularExpression(query, "i")),
+                    filterBuilder.Regex(d => d.FileContent, new MongoDB.Bson.BsonRegularExpression(query, "i")),
+                    filterBuilder.AnyEq(d => d.Tags, query)
+                );
+                filter &= textFilter;
+            }
 
             if (!string.IsNullOrWhiteSpace(category))
-                filter &= Builders<DocumentMeta>.Filter.Eq(d => d.Category, category);
+                filter &= filterBuilder.Eq(d => d.Category, category);
 
             if (!string.IsNullOrWhiteSpace(status))
-                filter &= Builders<DocumentMeta>.Filter.Eq(d => d.Status, status);
+                filter &= filterBuilder.Eq(d => d.Status, status);
 
             var mongoDocs = await _mongo.DocumentMetas
                 .Find(filter)
@@ -673,12 +737,12 @@ public class DocumentService
         return await FallbackSearchAsync(query, category, status);
     }
 
-    // ── Búsqueda fallback SQL Server ──────────────────────────────────────────
+    // ── Búsqueda fallback SQL ─────────────────────────────────────────────────
 
     private async Task<SearchResultViewModel> FallbackSearchAsync(
         string? query, string? category, string? status)
     {
-        var q = _sql.Documents.AsQueryable();
+        var q = ScopeDocuments();
 
         if (!string.IsNullOrWhiteSpace(query))
             q = q.Where(d => d.Title.Contains(query)
@@ -707,22 +771,19 @@ public class DocumentService
                 Category = d.Category,
                 Standard = d.Standard,
                 Tags = d.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                                      .Select(t => t.Trim()).ToList(),
+                              .Select(t => t.Trim()).ToList(),
                 Status = d.Status.ToString(),
                 FileExtension = d.FileExtension,
             }).ToList(),
         };
     }
 
-    // ── Re-indexación masiva ───────────────────────────────────────────────────────
-    // Recorre todos los documentos en SQL Server, extrae el texto de cada archivo
-    // y actualiza (o crea) su entrada en MongoDB con el campo fileContent.
-    // Solo accesible para Admin. Progreso reportado por retorno.
+    // ── Re-indexación masiva ──────────────────────────────────────────────────
 
     public async Task<ReIndexResultViewModel> ReIndexAllAsync(
         IProgress<string>? progress = null)
     {
-        var docs = await _sql.Documents
+        var docs = await ScopeDocuments()
             .OrderBy(d => d.Id)
             .ToListAsync();
 
@@ -739,6 +800,7 @@ public class DocumentService
                 var filter = Builders<DocumentMeta>.Filter.Eq(d => d.DocumentId, doc.Id);
                 var update = Builders<DocumentMeta>.Update
                     .Set(d => d.DocumentId, doc.Id)
+                    .Set(d => d.CompanyId, doc.CompanyId)
                     .Set(d => d.Code, doc.Code)
                     .Set(d => d.Title, doc.Title)
                     .Set(d => d.Description, doc.Description)
@@ -786,7 +848,7 @@ public class DocumentService
     public async Task<ComplianceReportViewModel> GetComplianceReportAsync(
         string dateFrom, string dateTo)
     {
-        var rows = await _sql.Documents
+        var rows = await ScopeDocuments()
             .GroupBy(d => new { d.Category, d.Standard })
             .Select(g => new ComplianceRow
             {
@@ -817,22 +879,26 @@ public class DocumentService
     // ── Reporte de auditoría ──────────────────────────────────────────────────
 
     public async Task<AuditReportViewModel> GetAuditReportAsync(
-    int page, int pageSize,
-    string? filterAction = null,
-    string? filterUser = null,
-    string? filterDocument = null,
-    string? filterDateFrom = null,
-    string? filterDateTo = null)
+        int page, int pageSize,
+        string? filterAction = null,
+        string? filterUser = null,
+        string? filterDocument = null,
+        string? filterDateFrom = null,
+        string? filterDateTo = null)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 10, 100);
+
+        var companyId = GetCompanyId();
 
         var query = _sql.AuditLogs
             .Include(l => l.Document)
             .Include(l => l.User)
             .AsQueryable();
 
-        // ── Filtros ───────────────────────────────────────────────────────────
+        if (!IsSuperAdmin() && companyId > 0)
+            query = query.Where(l => l.Document.CompanyId == companyId);
+
         if (!string.IsNullOrWhiteSpace(filterAction))
             query = query.Where(l => l.Action == filterAction);
 
@@ -852,7 +918,6 @@ public class DocumentService
             DateTime.TryParse(filterDateTo, out var dateTo))
             query = query.Where(l => l.CreatedAt <= dateTo.AddDays(1).ToUniversalTime());
 
-        // ── Paginación ────────────────────────────────────────────────────────
         var total = await query.CountAsync();
         var logs = await query
             .OrderByDescending(l => l.CreatedAt)
@@ -884,7 +949,8 @@ public class DocumentService
         };
     }
 
-    // ── Exportar auditoría (sin límite de paginación) ─────────────────────────
+    // ── Exportar auditoría ────────────────────────────────────────────────────
+
     public async Task<List<AuditReportRow>> ExportAuditAsync(
         string? filterAction = null,
         string? filterUser = null,
@@ -892,10 +958,15 @@ public class DocumentService
         string? filterDateFrom = null,
         string? filterDateTo = null)
     {
+        var companyId = GetCompanyId();
+
         var query = _sql.AuditLogs
             .Include(l => l.Document)
             .Include(l => l.User)
             .AsQueryable();
+
+        if (!IsSuperAdmin() && companyId > 0)
+            query = query.Where(l => l.Document.CompanyId == companyId);
 
         if (!string.IsNullOrWhiteSpace(filterAction))
             query = query.Where(l => l.Action == filterAction);
@@ -931,7 +1002,7 @@ public class DocumentService
         }).ToList();
     }
 
-    // ── Extrae texto de archivos adjuntos para búsqueda ───────────────────────
+    // ── Extrae texto de archivos adjuntos ─────────────────────────────────────
 
     private async Task<string> ExtractFileTextAsync(string storedFileName)
     {
@@ -942,11 +1013,9 @@ public class DocumentService
         var ext = Path.GetExtension(storedFileName).ToLowerInvariant();
         try
         {
-            // Texto plano y CSV — lectura directa
             if (ext is ".txt" or ".csv")
                 return await File.ReadAllTextAsync(path);
 
-            // PDF — requiere NuGet: UglyToad.PdfPig
             if (ext == ".pdf")
             {
                 var sb = new StringBuilder();
@@ -956,7 +1025,6 @@ public class DocumentService
                 return sb.ToString();
             }
 
-            // DOCX — requiere NuGet: DocumentFormat.OpenXml
             if (ext == ".docx")
             {
                 var sb = new StringBuilder();
@@ -981,13 +1049,13 @@ public class DocumentService
 
     private async Task SyncSearchServiceAsync(Document doc)
     {
-        // 1) Node.js microservicio (como antes)
         try
         {
             var client = _httpFactory.CreateClient("SearchService");
             var payload = new
             {
                 documentId = doc.Id,
+                companyId = doc.CompanyId,
                 code = doc.Code,
                 title = doc.Title,
                 description = doc.Description,
@@ -1007,7 +1075,6 @@ public class DocumentService
             _log.LogWarning("No se pudo sincronizar con Search Service: {Message}", ex.Message);
         }
 
-        // 2) MongoDB directo — incluye el contenido extraído del archivo
         try
         {
             var fileContent = await ExtractFileTextAsync(doc.StoredFileName);
@@ -1015,6 +1082,7 @@ public class DocumentService
             var filter = Builders<DocumentMeta>.Filter.Eq(d => d.DocumentId, doc.Id);
             var update = Builders<DocumentMeta>.Update
                 .Set(d => d.DocumentId, doc.Id)
+                .Set(d => d.CompanyId, doc.CompanyId)
                 .Set(d => d.Code, doc.Code)
                 .Set(d => d.Title, doc.Title)
                 .Set(d => d.Description, doc.Description)

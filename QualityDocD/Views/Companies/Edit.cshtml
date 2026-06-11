@@ -1,0 +1,44 @@
+﻿@model QualityDocD.Models.Domain.Company
+@{ ViewData["Title"] = $"Editar — {Model.Name}"; }
+
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0"><i class="bi bi-pencil me-2"></i>Editar Empresa</h5>
+            </div>
+            <div class="card-body">
+                @if (!ViewData.ModelState.IsValid)
+                {
+                    <div class="alert alert-danger">@Html.ValidationSummary(false)</div>
+                }
+                <form asp-action="Edit" asp-route-id="@Model.Id" method="post">
+                    @Html.AntiForgeryToken()
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Nombre</label>
+                        <input type="text" name="name" class="form-control" value="@Model.Name" required />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Slug</label>
+                        <input type="text" class="form-control" value="@Model.Slug" disabled />
+                        <div class="form-text"><i class="bi bi-lock me-1"></i>El slug no puede cambiarse.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Correo</label>
+                        <input type="email" name="email" class="form-control" value="@Model.Email" required />
+                    </div>
+                    <div class="mb-4">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="isActive" value="true" id="sw" @(Model.IsActive ? "checked" : "") />
+                            <label class="form-check-label fw-semibold" for="sw">Empresa activa</label>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-warning"><i class="bi bi-check-circle me-1"></i> Guardar</button>
+                        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i> Volver</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>

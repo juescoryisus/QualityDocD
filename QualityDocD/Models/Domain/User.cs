@@ -12,6 +12,10 @@ public class User
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastLoginAt { get; set; }
 
+    // Multi-empresa
+    public int CompanyId { get; set; }
+    public Company Company { get; set; } = null!;
+
     // Navegación
     public ICollection<Document> CreatedDocuments { get; set; } = new List<Document>();
     public ICollection<DocumentApproval> Approvals { get; set; } = new List<DocumentApproval>();

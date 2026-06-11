@@ -23,7 +23,10 @@ public class ApiTokenService
         int.TryParse(_cfg["ApiAuth:ExpirationHours"], out var h) ? h : 8;
 
     // ── Generar token ─────────────────────────────────────────────────────────
-    public string GenerateToken(int userId, string username, string email, string role, string department)
+    public string GenerateToken(
+        int userId, string username, string email,
+        string role, string department,
+        int companyId, string companySlug, string companyName)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(SecretKey));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -33,9 +36,12 @@ public class ApiTokenService
             new Claim(JwtRegisteredClaimNames.Sub,   userId.ToString()),
             new Claim(JwtRegisteredClaimNames.Email, email),
             new Claim(JwtRegisteredClaimNames.Jti,   Guid.NewGuid().ToString()),
-            new Claim("username",   username),
-            new Claim("role",       role),
-            new Claim("department", department),
+            new Claim("username",     username),
+            new Claim("role",         role),
+            new Claim("department",   department),
+            new Claim("company_id",   companyId.ToString()),
+            new Claim("company_slug", companySlug),
+            new Claim("company_name", companyName),
         };
 
         var token = new JwtSecurityToken(
@@ -80,6 +86,11 @@ public class ApiTokenService
                 Email = jwt.Claims.First(c => c.Type == JwtRegisteredClaimNames.Email).Value,
                 Role = jwt.Claims.First(c => c.Type == "role").Value,
                 Department = jwt.Claims.First(c => c.Type == "department").Value,
+                CompanyId = int.TryParse(
+                    jwt.Claims.FirstOrDefault(c => c.Type == "company_id")?.Value, out var cid)
+                    ? cid : 0,
+                CompanySlug = jwt.Claims.FirstOrDefault(c => c.Type == "company_slug")?.Value ?? "",
+                CompanyName = jwt.Claims.FirstOrDefault(c => c.Type == "company_name")?.Value ?? "",
             };
         }
         catch
@@ -96,4 +107,7 @@ public class ApiTokenPayload
     public string Email { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public string Department { get; set; } = string.Empty;
+    public int CompanyId { get; set; }
+    public string CompanySlug { get; set; } = string.Empty;
+    public string CompanyName { get; set; } = string.Empty;
 }

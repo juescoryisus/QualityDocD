@@ -4,13 +4,14 @@ using QualityDocD.Models.Domain;
 namespace QualityDocD.Data;
 
 /// <summary>
-/// Contexto principal — SQL Server.
-/// Maneja: Users, Documents, DocumentApprovals, AuditLogs.
+/// Contexto principal.
+/// Maneja: Companies, Users, Documents, DocumentApprovals, AuditLogs.
 /// </summary>
 public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
+    public DbSet<Company> Companies => Set<Company>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<DocumentApproval> DocumentApprovals => Set<DocumentApproval>();
@@ -20,6 +21,14 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(m);
 
+        // ── Company ───────────────────────────────────────────────────────────
+        m.Entity<Company>(e =>
+        {
+            e.HasIndex(c => c.Slug).IsUnique();
+            e.HasIndex(c => c.Email).IsUnique();
+            e.Property(c => c.IsActive).HasDefaultValue(true);
+        });
+
         // ── User ──────────────────────────────────────────────────────────────
         m.Entity<User>(e =>
         {
@@ -27,7 +36,11 @@ public class AppDbContext : DbContext
             e.HasIndex(u => u.Email).IsUnique();
             e.Property(u => u.Role).HasDefaultValue("Viewer");
             e.Property(u => u.IsActive).HasDefaultValue(true);
-            e.ToTable(t => t.UseSqlOutputClause(false)); // preparado para triggers
+            e.HasOne(u => u.Company)
+             .WithMany(c => c.Users)
+             .HasForeignKey(u => u.CompanyId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => t.UseSqlOutputClause(false));
         });
 
         // ── Document ──────────────────────────────────────────────────────────
@@ -39,7 +52,11 @@ public class AppDbContext : DbContext
              .WithMany(u => u.CreatedDocuments)
              .HasForeignKey(d => d.CreatedByUserId)
              .OnDelete(DeleteBehavior.Restrict);
-            e.ToTable(t => t.UseSqlOutputClause(false)); // preparado para triggers
+            e.HasOne(d => d.Company)
+             .WithMany(c => c.Documents)
+             .HasForeignKey(d => d.CompanyId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.ToTable(t => t.UseSqlOutputClause(false));
         });
 
         // ── DocumentApproval ─────────────────────────────────────────────────
@@ -54,7 +71,7 @@ public class AppDbContext : DbContext
              .WithMany(u => u.Approvals)
              .HasForeignKey(a => a.ReviewerId)
              .OnDelete(DeleteBehavior.Restrict);
-            e.ToTable(t => t.UseSqlOutputClause(false)); // preparado para triggers
+            e.ToTable(t => t.UseSqlOutputClause(false));
         });
 
         // ── AuditLog ──────────────────────────────────────────────────────────
@@ -68,7 +85,7 @@ public class AppDbContext : DbContext
              .WithMany()
              .HasForeignKey(l => l.UserId)
              .OnDelete(DeleteBehavior.SetNull);
-            e.ToTable(t => t.UseSqlOutputClause(false)); // preparado para triggers
+            e.ToTable(t => t.UseSqlOutputClause(false));
         });
     }
 }

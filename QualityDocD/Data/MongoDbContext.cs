@@ -56,6 +56,10 @@ public class MongoDbContext
                 new CreateIndexOptions { Unique = true, Name = "idx_code" }),
 
             new CreateIndexModel<DocumentMeta>(
+                keys.Ascending(d => d.CompanyId),
+                new CreateIndexOptions { Name = "idx_companyId" }),
+
+            new CreateIndexModel<DocumentMeta>(
                 keys.Ascending(d => d.Category),
                 new CreateIndexOptions { Name = "idx_category" }),
 
@@ -103,6 +107,9 @@ public class DocumentMeta
 
     [BsonElement("documentId")]
     public int DocumentId { get; set; }
+
+    [BsonElement("companyId")]
+    public int CompanyId { get; set; }
 
     [BsonElement("code")]
     public string Code { get; set; } = string.Empty;

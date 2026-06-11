@@ -22,10 +22,6 @@ public class ApiAuthController : ControllerBase
     }
 
     // ── POST /api/auth/login ──────────────────────────────────────────────────
-    /// <summary>
-    /// Autentica un usuario con username/email + password y devuelve un JWT.
-    /// Puede ser llamado desde PHP, scripts, curl o cualquier cliente HTTP.
-    /// </summary>
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] ApiLoginRequest req)
     {
@@ -35,14 +31,16 @@ public class ApiAuthController : ControllerBase
         var user = await _auth.ValidateAsync(req.Username.Trim(), req.Password);
 
         if (user == null)
-            return Unauthorized(new { error = "Credenciales incorrectas." });
+            return Unauthorized(new { error = "Credenciales incorrectas o empresa inactiva." });
 
-        var token = _tokens.GenerateToken(user.Id, user.Username, user.Email, user.Role, user.Department);
+        var token = _tokens.GenerateToken(
+            user.Id, user.Username, user.Email, user.Role, user.Department,
+            user.CompanyId, user.Company.Slug, user.Company.Name);
 
         return Ok(new
         {
             token,
-            expires_in = 28800, // 8 horas en segundos
+            expires_in = 28800,
             user = new
             {
                 id = user.Id,
@@ -50,14 +48,17 @@ public class ApiAuthController : ControllerBase
                 email = user.Email,
                 role = user.Role,
                 department = user.Department,
+                company = new
+                {
+                    id = user.Company.Id,
+                    slug = user.Company.Slug,
+                    name = user.Company.Name,
+                },
             }
         });
     }
 
     // ── POST /api/auth/validate ───────────────────────────────────────────────
-    /// <summary>
-    /// Valida un JWT y devuelve su payload. Útil para que PHP verifique sesiones.
-    /// </summary>
     [HttpPost("validate")]
     public IActionResult Validate([FromBody] ApiValidateRequest req)
     {
@@ -77,13 +78,16 @@ public class ApiAuthController : ControllerBase
             email = payload.Email,
             role = payload.Role,
             department = payload.Department,
+            company = new
+            {
+                id = payload.CompanyId,
+                slug = payload.CompanySlug,
+                name = payload.CompanyName,
+            },
         });
     }
 
     // ── GET /api/auth/me ──────────────────────────────────────────────────────
-    /// <summary>
-    /// Devuelve el perfil del usuario autenticado (requiere Bearer token).
-    /// </summary>
     [HttpGet("me")]
     public IActionResult Me()
     {
@@ -97,6 +101,12 @@ public class ApiAuthController : ControllerBase
             email = payload.Email,
             role = payload.Role,
             department = payload.Department,
+            company = new
+            {
+                id = payload.CompanyId,
+                slug = payload.CompanySlug,
+                name = payload.CompanyName,
+            },
         });
     }
 

@@ -27,6 +27,7 @@ builder.Services.AddSingleton<MongoDbContext>();
 // ── Servicios y HTTP Clients ──────────────────────────────────────────────────
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DocumentService>();
+builder.Services.AddScoped<CompanyService>();
 builder.Services.AddScoped<ApiTokenService>();
 builder.Services.AddHttpContextAccessor();
 
@@ -72,7 +73,7 @@ app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// ── Seed automático del admin ──────────────────────────────────────────────────
+// ── Seed automático ────────────────────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -86,9 +87,37 @@ using (var scope = app.Services.CreateScope())
         // Las tablas ya existen sin historial de migraciones
     }
 
+    // ── Empresa por defecto ────────────────────────────────────────────────────
+    if (!await db.Companies.AnyAsync())
+    {
+        db.Companies.Add(new Company
+        {
+            Name = "Empresa Demo",
+            Slug = "demo",
+            Email = "admin@demo.qualitydoc.local",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    // ── Usuarios de demostración ───────────────────────────────────────────────
     if (!await db.Users.AnyAsync())
     {
+        var company = await db.Companies.FirstAsync(c => c.Slug == "demo");
+
         db.Users.AddRange(
+            new User
+            {
+                Username = "superadmin",
+                Email = "superadmin@qualitydoc.local",
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword("SuperAdmin123!"),
+                Role = "SuperAdmin",
+                Department = "TI",
+                IsActive = true,
+                CompanyId = company.Id,
+                CreatedAt = DateTime.UtcNow,
+            },
             new User
             {
                 Username = "admin",
@@ -97,7 +126,8 @@ using (var scope = app.Services.CreateScope())
                 Role = "Admin",
                 Department = "TI",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CompanyId = company.Id,
+                CreatedAt = DateTime.UtcNow,
             },
             new User
             {
@@ -107,7 +137,8 @@ using (var scope = app.Services.CreateScope())
                 Role = "Manager",
                 Department = "Calidad",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CompanyId = company.Id,
+                CreatedAt = DateTime.UtcNow,
             },
             new User
             {
@@ -117,7 +148,8 @@ using (var scope = app.Services.CreateScope())
                 Role = "Reviewer",
                 Department = "Producción",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CompanyId = company.Id,
+                CreatedAt = DateTime.UtcNow,
             },
             new User
             {
@@ -127,7 +159,8 @@ using (var scope = app.Services.CreateScope())
                 Role = "Reviewer",
                 Department = "Calidad",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CompanyId = company.Id,
+                CreatedAt = DateTime.UtcNow,
             },
             new User
             {
@@ -137,7 +170,8 @@ using (var scope = app.Services.CreateScope())
                 Role = "Editor",
                 Department = "Operaciones",
                 IsActive = true,
-                CreatedAt = DateTime.UtcNow
+                CompanyId = company.Id,
+                CreatedAt = DateTime.UtcNow,
             }
         );
         await db.SaveChangesAsync();

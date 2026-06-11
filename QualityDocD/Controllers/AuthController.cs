@@ -32,7 +32,7 @@ public class AuthController : Controller
         var user = await _auth.ValidateAsync(model.Username, model.Password);
         if (user == null)
         {
-            model.Error = "Usuario o contraseña incorrectos.";
+            model.Error = "Usuario o contraseña incorrectos, o la empresa está inactiva.";
             return View(model);
         }
 
@@ -43,6 +43,9 @@ public class AuthController : Controller
             new(ClaimTypes.Email,          user.Email),
             new(ClaimTypes.Role,           user.Role),
             new("department",              user.Department),
+            new("company_id",              user.CompanyId.ToString()),
+            new("company_slug",            user.Company.Slug),
+            new("company_name",            user.Company.Name),
         };
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
@@ -69,19 +72,33 @@ public class AuthController : Controller
 
     // GET /Auth/Register
     [HttpGet]
-    public IActionResult Register() => View(new RegisterViewModel());
+    public async Task<IActionResult> Register([FromServices] CompanyService companySvc)
+    {
+        ViewBag.Companies = await companySvc.GetAllAsync();
+        return View(new RegisterViewModel());
+    }
 
     // POST /Auth/Register
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> Register(RegisterViewModel model)
+    public async Task<IActionResult> Register(RegisterViewModel model,
+        [FromServices] CompanyService companySvc)
     {
-        if (!ModelState.IsValid) return View(model);
+        if (!ModelState.IsValid)
+        {
+            ViewBag.Companies = await companySvc.GetAllAsync();
+            return View(model);
+        }
 
         var (ok, error) = await _auth.RegisterAsync(
             model.Username, model.Email, model.Password,
-            model.Role, model.Department);
+            model.Role, model.Department, model.CompanySlug);
 
-        if (!ok) { model.Error = error; return View(model); }
+        if (!ok)
+        {
+            model.Error = error;
+            ViewBag.Companies = await companySvc.GetAllAsync();
+            return View(model);
+        }
 
         TempData["Success"] = $"Usuario '{model.Username}' registrado exitosamente.";
         return RedirectToAction("Login");

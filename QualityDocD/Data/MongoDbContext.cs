@@ -132,18 +132,35 @@ public class DocumentMeta
     [BsonElement("fileExtension")]
     public string FileExtension { get; set; } = string.Empty;
 
+    /// <summary>Campo original C# — se mantiene por compatibilidad.</summary>
+    [BsonElement("fileContent")]
+    public string FileContent { get; set; } = string.Empty;
+
+    /// <summary>Campo usado por el índice full-text del search-service Node.js.</summary>
+    [BsonElement("contentText")]
+    public string ContentText { get; set; } = string.Empty;
+
     [BsonElement("status")]
-    public string Status { get; set; } = "Draft";
+    public string Status { get; set; } = string.Empty;
 
     [BsonElement("isPublic")]
     public bool IsPublic { get; set; }
 
-    [BsonElement("fileContent")]
-    public string FileContent { get; set; } = string.Empty;    // ← NUEVO
+    [BsonElement("version")]
+    public string Version { get; set; } = string.Empty;
+
+    [BsonElement("format")]
+    public string Format { get; set; } = string.Empty;
+
+    [BsonElement("approvedAt")]
+    [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
+    public DateTime? ApprovedAt { get; set; }
 
     [BsonElement("createdAt")]
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
+    public DateTime CreatedAt { get; set; }
 
     [BsonElement("updatedAt")]
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    [BsonDateTimeOptions(Kind = DateTimeKind.Utc)]
+    public DateTime UpdatedAt { get; set; }
 }

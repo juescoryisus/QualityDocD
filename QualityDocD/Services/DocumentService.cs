@@ -1,11 +1,12 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using System.Text;
-using System.Text.Json;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using QualityDocD.Data;
 using QualityDocD.Models.Domain;
 using QualityDocD.Models.ViewModels;
 using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
 
 namespace QualityDocD.Services;
 
@@ -470,6 +471,41 @@ public class DocumentService
         return (true, null);
     }
 
+    // ── Eliminar documento ────────────────────────────────────────────────────
+
+    public async Task<(bool ok, string? error)> DeleteAsync(int id, int userId)
+    {
+        var doc = await ScopeDocuments().FirstOrDefaultAsync(d => d.Id == id);
+        if (doc == null) return (false, "Documento no encontrado.");
+
+        // Solo se pueden eliminar borradores o rechazados
+        if (doc.Status is not (DocumentStatus.Draft or DocumentStatus.Rejected))
+            return (false, "Solo se pueden eliminar documentos en estado Borrador o Rechazado.");
+
+        await AddAuditAsync(doc, userId, "Deleted", doc.Status.ToString(), null);
+        await SyncPgAuditAsync(doc, userId, "Deleted", doc.Status.ToString(), null);
+
+        // Eliminar del índice MongoDB
+        try
+        {
+            await _mongo.DocumentMetas.DeleteOneAsync(
+                Builders<DocumentMeta>.Filter.Eq(d => d.DocumentId, doc.Id));
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning("No se pudo eliminar de MongoDB documentId={Id}: {Msg}", doc.Id, ex.Message);
+        }
+
+        // Eliminar archivo físico si existe
+        if (!string.IsNullOrEmpty(doc.StoredFileName))
+            DeleteFile(doc.StoredFileName);
+
+        _sql.Documents.Remove(doc);
+        await _sql.SaveChangesAsync();
+
+        return (true, null);
+    }
+
     // ── Descargar archivo ─────────────────────────────────────────────────────
 
     public async Task<(Stream stream, string fileName, string contentType)?> DownloadAsync(
@@ -489,15 +525,34 @@ public class DocumentService
     public async Task<FilePreviewViewModel?> PreviewAsync(int id)
     {
         var doc = await ScopeDocuments().FirstOrDefaultAsync(d => d.Id == id);
-        if (doc == null || string.IsNullOrEmpty(doc.StoredFileName)) return null;
-
-        var path = Path.Combine(GetUploadPath(), doc.StoredFileName);
-        if (!File.Exists(path)) return null;
+        if (doc == null) return null;
 
         var ext = doc.FileExtension?.ToLowerInvariant() ?? string.Empty;
 
+        if (string.IsNullOrEmpty(doc.StoredFileName))
+            return new FilePreviewViewModel
+            {
+                DocumentId = doc.Id,
+                Title = doc.Title,
+                OriginalFileName = doc.OriginalFileName ?? "(sin archivo)",
+                FileExtension = ext,
+                PreviewType = "no-file",
+            };
+
+        var path = Path.Combine(GetUploadPath(), doc.StoredFileName);
+
+        if (!File.Exists(path))
+            return new FilePreviewViewModel
+            {
+                DocumentId = doc.Id,
+                Title = doc.Title,
+                OriginalFileName = doc.OriginalFileName ?? string.Empty,
+                FileExtension = ext,
+                PreviewType = "no-file",
+                TextContent = path,
+            };
+
         if (ext == ".pdf")
-        {
             return new FilePreviewViewModel
             {
                 DocumentId = doc.Id,
@@ -506,7 +561,6 @@ public class DocumentService
                 FileExtension = ext,
                 PreviewType = "pdf",
             };
-        }
 
         if (ext is ".txt" or ".csv")
         {
@@ -647,13 +701,10 @@ public class DocumentService
 
             if (!string.IsNullOrWhiteSpace(query))
             {
-                var textFilter = filterBuilder.Or(
-                    filterBuilder.Regex(d => d.Title, new MongoDB.Bson.BsonRegularExpression(query, "i")),
-                    filterBuilder.Regex(d => d.Description, new MongoDB.Bson.BsonRegularExpression(query, "i")),
-                    filterBuilder.Regex(d => d.FileContent, new MongoDB.Bson.BsonRegularExpression(query, "i")),
-                    filterBuilder.AnyEq(d => d.Tags, query)
-                );
-                filter &= textFilter;
+                // Usa $text para aprovechar el índice full-text de MongoDB.
+                // A diferencia de Regex, $text tokeniza correctamente:
+                //   "docker compose" encuentra "docker-compose", "Docker-Compose", etc.
+                filter &= filterBuilder.Text(query, new TextSearchOptions { CaseSensitive = false });
             }
 
             if (!string.IsNullOrWhiteSpace(category))
@@ -696,11 +747,15 @@ public class DocumentService
         try
         {
             var client = _httpFactory.CreateClient("SearchService");
-            var url = $"/api/search?q={Uri.EscapeDataString(query ?? "")}&mode=all";
+            var url = $"/api/search?q={Uri.EscapeDataString(query ?? "")}";
             if (!string.IsNullOrWhiteSpace(category))
                 url += $"&category={Uri.EscapeDataString(category)}";
             if (!string.IsNullOrWhiteSpace(status))
                 url += $"&status={Uri.EscapeDataString(status)}";
+            // Sin status = sin filtro en el microservicio (ve todos los estados)
+            // Filtrar por empresa salvo SuperAdmin
+            if (!IsSuperAdmin() && companyId > 0)
+                url += $"&companyId={companyId}";
 
             var response = await client.GetAsync(url);
             if (response.IsSuccessStatusCode)
@@ -783,10 +838,11 @@ public class DocumentService
     public async Task<ReIndexResultViewModel> ReIndexAllAsync(
         IProgress<string>? progress = null)
     {
-        var docs = await ScopeDocuments()
+        var docs = await _sql.Documents
             .OrderBy(d => d.Id)
             .ToListAsync();
 
+        var client = _httpFactory.CreateClient("SearchService");
         int ok = 0, skipped = 0, failed = 0;
         var errors = new List<string>();
 
@@ -797,8 +853,39 @@ public class DocumentService
                 var fileContent = await ExtractFileTextAsync(doc.StoredFileName);
                 var hasFile = !string.IsNullOrEmpty(fileContent);
 
+                // ── 1) Node.js primero ────────────────────────────────────────
+                try
+                {
+                    var payload = new
+                    {
+                        documentId = doc.Id,
+                        versionId = doc.Id,
+                        companyId = doc.CompanyId,
+                        code = doc.Code,
+                        title = doc.Title,
+                        description = doc.Description,
+                        category = doc.Category,
+                        standard = doc.Standard,
+                        tags = doc.Tags,
+                        fileExtension = doc.FileExtension,
+                        format = doc.FileExtension?.TrimStart('.').ToUpperInvariant() ?? "",
+                        version = doc.Version.ToString(),
+                        status = doc.Status.ToString(),
+                        isPublic = doc.IsPublic,
+                        approvedAt = doc.ApprovedAt,
+                        contentText = fileContent,
+                    };
+                    var body = new StringContent(
+                        JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                    await client.PostAsync("/api/documents", body);
+                }
+                catch { /* No bloquea si el search service no está disponible */ }
+
+                // ── 2) MongoDB directo DESPUÉS — esta escritura siempre gana ──
                 var filter = Builders<DocumentMeta>.Filter.Eq(d => d.DocumentId, doc.Id);
                 var update = Builders<DocumentMeta>.Update
+                    .SetOnInsert(d => d.CreatedAt,
+                        doc.CreatedAt == default ? DateTime.UtcNow : doc.CreatedAt)
                     .Set(d => d.DocumentId, doc.Id)
                     .Set(d => d.CompanyId, doc.CompanyId)
                     .Set(d => d.Code, doc.Code)
@@ -812,7 +899,10 @@ public class DocumentService
                     .Set(d => d.FileExtension, doc.FileExtension)
                     .Set(d => d.Status, doc.Status.ToString())
                     .Set(d => d.IsPublic, doc.IsPublic)
+                    .Set(d => d.Version, doc.Version.ToString())
+                    .Set(d => d.ApprovedAt, doc.ApprovedAt)
                     .Set(d => d.FileContent, fileContent)
+                    .Set(d => d.ContentText, fileContent)
                     .Set(d => d.UpdatedAt, DateTime.UtcNow);
 
                 await _mongo.DocumentMetas.UpdateOneAsync(
@@ -821,7 +911,9 @@ public class DocumentService
                 if (hasFile) ok++;
                 else skipped++;
 
-                progress?.Report($"[{doc.Code}] {doc.Title} — {(hasFile ? "texto extraído" : "sin archivo")}");
+                progress?.Report(
+                    $"[{doc.Code}] {doc.Title} — " +
+                    $"{(hasFile ? $"texto extraído ({fileContent.Length} chars)" : "sin archivo")}");
             }
             catch (Exception ex)
             {
@@ -1007,8 +1099,14 @@ public class DocumentService
     private async Task<string> ExtractFileTextAsync(string storedFileName)
     {
         if (string.IsNullOrEmpty(storedFileName)) return string.Empty;
+
         var path = Path.Combine(GetUploadPath(), storedFileName);
-        if (!File.Exists(path)) return string.Empty;
+
+        if (!File.Exists(path))
+        {
+            _log.LogWarning("Archivo no encontrado para extracción de texto: {Path}", path);
+            return string.Empty;
+        }
 
         var ext = Path.GetExtension(storedFileName).ToLowerInvariant();
         try
@@ -1039,7 +1137,8 @@ public class DocumentService
         }
         catch (Exception ex)
         {
-            _log.LogWarning("No se pudo extraer texto de {File}: {Msg}", storedFileName, ex.Message);
+            _log.LogWarning("No se pudo extraer texto de {File} (ruta completa: {Path}): {Msg}",
+                storedFileName, path, ex.Message);
         }
 
         return string.Empty;
@@ -1049,12 +1148,15 @@ public class DocumentService
 
     private async Task SyncSearchServiceAsync(Document doc)
     {
+        var fileContent = await ExtractFileTextAsync(doc.StoredFileName);
+
         try
         {
             var client = _httpFactory.CreateClient("SearchService");
             var payload = new
             {
                 documentId = doc.Id,
+                versionId = doc.Id,
                 companyId = doc.CompanyId,
                 code = doc.Code,
                 title = doc.Title,
@@ -1063,8 +1165,12 @@ public class DocumentService
                 standard = doc.Standard,
                 tags = doc.Tags,
                 fileExtension = doc.FileExtension,
+                format = doc.FileExtension?.TrimStart('.').ToUpperInvariant() ?? "",
+                version = doc.Version.ToString(),
                 status = doc.Status.ToString(),
                 isPublic = doc.IsPublic,
+                approvedAt = doc.ApprovedAt,
+                contentText = fileContent,
             };
             var content = new StringContent(
                 JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -1077,10 +1183,9 @@ public class DocumentService
 
         try
         {
-            var fileContent = await ExtractFileTextAsync(doc.StoredFileName);
-
             var filter = Builders<DocumentMeta>.Filter.Eq(d => d.DocumentId, doc.Id);
             var update = Builders<DocumentMeta>.Update
+                .SetOnInsert(d => d.CreatedAt, DateTime.UtcNow)
                 .Set(d => d.DocumentId, doc.Id)
                 .Set(d => d.CompanyId, doc.CompanyId)
                 .Set(d => d.Code, doc.Code)
@@ -1094,7 +1199,10 @@ public class DocumentService
                 .Set(d => d.FileExtension, doc.FileExtension)
                 .Set(d => d.Status, doc.Status.ToString())
                 .Set(d => d.IsPublic, doc.IsPublic)
+                .Set(d => d.Version, doc.Version.ToString())
+                .Set(d => d.ApprovedAt, doc.ApprovedAt)
                 .Set(d => d.FileContent, fileContent)
+                .Set(d => d.ContentText, fileContent)
                 .Set(d => d.UpdatedAt, DateTime.UtcNow);
 
             await _mongo.DocumentMetas.UpdateOneAsync(

@@ -89,3 +89,22 @@ else
         </div>
     </div>
 }
+
+{
+<div class="card border-0 shadow-sm text-center py-5">
+    <div class="card-body">
+        <i class="bi bi-file-earmark-x fs-1 text-danger d-block mb-3"></i>
+        <p class="text-muted mb-1">El archivo <strong>@Model.OriginalFileName</strong> no se encontró en el servidor.</p>
+        @if (!string.IsNullOrEmpty(Model.TextContent))
+        {
+            <code class="small text-secondary">Ruta buscada: @Model.TextContent</code>
+        }
+        <div class="mt-3">
+            <a asp-action="Download" asp-route-id="@Model.DocumentId"
+               class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-download me-1"></i>Intentar descargar
+            </a>
+        </div>
+    </div>
+</div>
+}

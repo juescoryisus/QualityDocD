@@ -39,6 +39,8 @@ services:
       ApiAuth__JwtSecret:            "${SESSION_SECRET:-QualityDoc-JWT-Secret-Change-Me!}"
       ApiAuth__ExpirationHours:      "8"
       ASPNETCORE_URLS:               "http://+:5000"
+    volumes:
+      - uploads_data:/app/wwwroot/uploads
 
   # ── Node.js API ───────────────────────────────────────────────────────────────
   node-api:
@@ -73,6 +75,13 @@ services:
     depends_on:
       - qualitydoc-app
       - search-service
+
+# ── Volumen persistente para archivos subidos ─────────────────────────────────
+volumes:
+  uploads_data:
+    driver: local
+    labels:
+      project: "qualitydoc"
 
 # ── Red compartida (creada por docker-compose.infra.yml) ──────────────────────
 networks:

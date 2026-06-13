@@ -3,8 +3,11 @@ using Microsoft.EntityFrameworkCore;
 using QualityDocD.Data;
 using QualityDocD.Models.Domain;
 using QualityDocD.Services;
+using MongoDB.Driver;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddScoped<TextExtractionService>();
 
 // ── MVC ───────────────────────────────────────────────────────────────────────
 builder.Services.AddControllersWithViews();
@@ -23,7 +26,19 @@ builder.Services.AddDbContext<AuditDbContext>(opts =>
 
 // ── MongoDB (metadatos flexibles + búsqueda full-text) ────────────────────────
 builder.Services.AddSingleton<MongoDbContext>();
+builder.Services.AddSingleton<IMongoDatabase>(sp =>
+{
+    var cfg = builder.Configuration.GetSection("MongoDB");
+    var host = cfg["Host"];
+    var port = cfg["Port"];
+    var database = cfg["Database"];
+    var username = cfg["Username"];
+    var password = cfg["Password"];
 
+    var connectionString = $"mongodb://{username}:{password}@{host}:{port}";
+    var client = new MongoClient(connectionString);
+    return client.GetDatabase(database);
+});
 // ── Servicios y HTTP Clients ──────────────────────────────────────────────────
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DocumentService>();

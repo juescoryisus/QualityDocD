@@ -50,6 +50,11 @@ app.get('/health', async (_req, res) => {
 // Rutas de búsqueda y documentos
 app.use('/api', searchRouter);
 
+const uploadRouter = require('./routes/upload');  // ← agregar
+// ...
+app.use('/api', searchRouter);
+app.use('/api', uploadRouter);   // ← agregar
+
 // ── Inicio ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[Search Service] Escuchando en puerto ${PORT}`);

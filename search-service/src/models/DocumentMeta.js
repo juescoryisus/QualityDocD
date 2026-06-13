@@ -51,4 +51,3 @@ documentMetaSchema.index(
 );
 
 module.exports = mongoose.model('DocumentMeta', documentMetaSchema);
-s

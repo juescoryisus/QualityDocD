@@ -1,5 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MongoDB.Bson;
+using MongoDB.Driver;
 using QualityDocD.Models.ViewModels;
 using QualityDocD.Services;
 using System.Security.Claims;
@@ -10,8 +12,18 @@ namespace QualityDocD.Controllers;
 public class DocumentsController : Controller
 {
     private readonly DocumentService _svc;
+    private readonly IWebHostEnvironment _env;
+    private readonly IMongoDatabase _db;
 
-    public DocumentsController(DocumentService svc) => _svc = svc;
+    public DocumentsController(
+        DocumentService svc,
+        IWebHostEnvironment env,
+        IMongoDatabase db)
+    {
+        _svc = svc;
+        _env = env;
+        _db = db;
+    }
 
     // GET /Documents
     public async Task<IActionResult> Index(
@@ -51,7 +63,6 @@ public class DocumentsController : Controller
         var vm = await _svc.GetDetailAsync(id);
         if (vm == null) return NotFound();
 
-        // Solo se puede editar si está en Borrador o Cambios Pendientes
         if (vm.Status is not ("Draft" or "PendingChanges"))
         {
             TempData["Error"] = "Solo se pueden editar documentos en estado Borrador o Cambios Pendientes.";
@@ -110,7 +121,7 @@ public class DocumentsController : Controller
         return RedirectToAction(nameof(Details), new { id });
     }
 
-    // POST /Documents/Reject/5  — Rechazar definitivamente
+    // POST /Documents/Reject/5
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Roles = "Admin,Manager,Reviewer")]
     public async Task<IActionResult> Reject(int id, string? comments)
@@ -128,7 +139,7 @@ public class DocumentsController : Controller
         return RedirectToAction(nameof(Details), new { id });
     }
 
-    // POST /Documents/RequestChanges/5  — Solicitar cambios (estado intermedio)
+    // POST /Documents/RequestChanges/5
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Roles = "Admin,Manager,Reviewer")]
     public async Task<IActionResult> RequestChanges(int id, string? comments)
@@ -167,13 +178,8 @@ public class DocumentsController : Controller
         return File(stream, contentType, fileName);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    private int GetUserId() =>
-        int.Parse(User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier) ?? "0");
-
-
-    // GET /Documents/Preview/5  — página del visor
-    [AllowAnonymous]   // o [Authorize] si quieres restringirlo
+    // GET /Documents/Preview/5
+    [AllowAnonymous]
     public async Task<IActionResult> Preview(int id)
     {
         var vm = await _svc.PreviewAsync(id);
@@ -181,15 +187,97 @@ public class DocumentsController : Controller
         return View(vm);
     }
 
-    // GET /Documents/ViewFile/5  — stream del archivo (para <iframe> PDF)
+    // GET /Documents/ViewFile/5
     public async Task<IActionResult> ViewFile(int id)
     {
         var result = await _svc.GetFileStreamAsync(id);
         if (result == null) return NotFound();
         var (stream, contentType) = result.Value;
-
-        // Inline = muestra en navegador en vez de descargar
         Response.Headers["Content-Disposition"] = "inline";
         return File(stream, contentType);
     }
+
+    // POST /Documents/UploadAttachment/5
+    [HttpPost]
+    public async Task<IActionResult> UploadAttachment(
+        int documentId,
+        IFormFile file,
+        [FromServices] TextExtractionService extractor)
+    {
+        var uploadsPath = Path.Combine(_env.WebRootPath, "uploads");
+        Directory.CreateDirectory(uploadsPath);
+
+        var uniqueName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName)}";
+        var filePath = Path.Combine(uploadsPath, uniqueName);
+
+        using (var stream = System.IO.File.Create(filePath))
+            await file.CopyToAsync(stream);
+
+        using var extractStream = file.OpenReadStream();
+        var textContent = await extractor.ExtractTextAsync(
+            extractStream, file.FileName, file.ContentType);
+
+        var attachment = new DocumentAttachment
+        {
+            DocumentId = documentId,
+            FileName = uniqueName,
+            OriginalName = file.FileName,
+            MimeType = file.ContentType,
+            FileSize = file.Length,
+            TextContent = textContent,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        var collection = _db.GetCollection<DocumentAttachment>("attachments");
+        await collection.InsertOneAsync(attachment);
+
+        return Ok(attachment);
+    }
+
+    // GET /Documents/Search?q=texto
+    [HttpGet]
+    public async Task<IActionResult> Search([FromQuery] string q)
+    {
+        if (string.IsNullOrWhiteSpace(q))
+            return Ok(new List<object>());
+
+        var collection = _db.GetCollection<DocumentAttachment>("attachments");
+
+        var filter = Builders<DocumentAttachment>.Filter.Or(
+            Builders<DocumentAttachment>.Filter.Regex(
+                "originalName", new BsonRegularExpression(q, "i")),
+            Builders<DocumentAttachment>.Filter.Regex(
+                "textContent", new BsonRegularExpression(q, "i"))
+        );
+
+        var matches = await collection.Find(filter).ToListAsync();
+        return Ok(matches);
+    }
+
+    // ── Helper ────────────────────────────────────────────────────────────────
+    private int GetUserId() =>
+        int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "0");
+
+
+
+   
+
+    // POST /Documents/Delete/5
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Roles = "Admin,Manager,SuperAdmin")]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var (ok, error) = await _svc.DeleteAsync(id, GetUserId());
+
+        if (!ok)
+        {
+            TempData["Error"] = error;
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        TempData["Success"] = "Documento eliminado correctamente.";
+        return RedirectToAction(nameof(Index));
+    }
 }
+
+

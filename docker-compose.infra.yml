@@ -61,7 +61,7 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
-      - ./db/mongodb:/docker-entrypoint-initdb.d:ro
+      - ./db/mongodb/init.js:/docker-entrypoint-initdb.d/01_init.js:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 15s

@@ -1,5 +1,4 @@
-﻿
-param(
+﻿param(
     [ValidateSet("All", "Infra", "Apps", "Portal")]
     [string] $Mode = "All",
     [switch] $SkipVS,
@@ -25,9 +24,9 @@ Clear-Host
 Write-Host ""
 Write-Host "  ╔══════════════════════════════════════════════════╗" -ForegroundColor Blue
 Write-Host "  ║         QualityDoc — Setup rápido                ║" -ForegroundColor Blue
-Write-Host "  ║  Infra · Apps · Portal  (3 composers)            ║" -ForegroundColor Blue
+Write-Host "  ║   Organizado por Proyectos en Docker Desktop     ║" -ForegroundColor Blue
 Write-Host "  ╚══════════════════════════════════════════════════╝" -ForegroundColor Blue
-Write-Host "  Modo: $Mode" -ForegroundColor DarkCyan
+Write-Host "  Modo de ejecución: $Mode" -ForegroundColor DarkCyan
 Write-Host ""
 
 # ── 0. Moverse a la carpeta del script ───────────────────────────────────────
@@ -72,35 +71,35 @@ if ($ResetData) {
     docker compose -f $ComposeInfra  down -v 2>&1 | Out-Null
     docker compose -f $ComposeApps   down    2>&1 | Out-Null
     docker compose -f $ComposePortal down    2>&1 | Out-Null
-    Write-OK "Volúmenes eliminados. Las bases de datos se crearán desde cero."
+    Write-OK "Contenedores y volúmenes eliminados de todos los proyectos."
 }
 
 # ── Función auxiliar: levantar un composer ────────────────────────────────────
 function Start-Compose ($File, $Label) {
-    Write-Step "Levantando $Label ($File)..."
+    Write-Step "Levantando servicios en $Label..."
     docker compose -f $File up -d 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Error al levantar $Label. Revisa el mensaje anterior."
+        Write-Fail "Error al levantar el proyecto $Label. Revisa el mensaje anterior."
         exit 1
     }
-    Write-OK "$Label iniciado."
+    Write-OK "Proyecto $Label iniciado correctamente."
 }
 
-# ── 4. Levantar según el modo ─────────────────────────────────────────────────
+# ── 4. Levantar según el modo (Sincronizado con los nombres de Carpeta) ───────
 switch ($Mode) {
-    "Infra"  { Start-Compose $ComposeInfra  "Infraestructura (SQL Server + PostgreSQL + MongoDB)" }
-    "Apps"   { Start-Compose $ComposeApps   "Backend (.NET + Node API + Search Service)" }
-    "Portal" { Start-Compose $ComposePortal "Portal (PHP)" }
+    "Infra"  { Start-Compose $ComposeInfra  "carpeta 'qualitydoc-databases'" }
+    "Apps"   { Start-Compose $ComposeApps   "carpeta 'qualitydoc-apps' (Backend)" }
+    "Portal" { Start-Compose $ComposePortal "carpeta 'qualitydoc-apps' (Portal PHP)" }
     "All" {
-        Start-Compose $ComposeInfra  "Infraestructura (SQL Server + PostgreSQL + MongoDB)"
-        Start-Compose $ComposeApps   "Backend (.NET + Node API + Search Service)"
-        Start-Compose $ComposePortal "Portal (PHP)"
+        Start-Compose $ComposeInfra  "carpeta 'qualitydoc-databases'"
+        Start-Compose $ComposeApps   "carpeta 'qualitydoc-apps' (Backend)"
+        Start-Compose $ComposePortal "carpeta 'qualitydoc-apps' (Portal PHP)"
     }
 }
 
 # ── 5. Esperar a que los motores de BD estén listos ───────────────────────────
 if ($Mode -in @("Infra", "All")) {
-    Write-Step "Esperando a que los motores de base de datos estén listos..."
+    Write-Step "Esperando estabilidad en la carpeta 'qualitydoc-databases'..."
 
     $Services = @{
         "qualitydoc_sqlserver" = "SQL Server"
@@ -133,7 +132,7 @@ if ($Mode -in @("Infra", "All")) {
         if (-not $Ready) {
             Write-Host " ⚠" -ForegroundColor Yellow
             Write-Warn "$Name tardó más de ${MaxWait}s. Puede que aún esté iniciando."
-            Write-Warn "Verifica con: docker compose -f $ComposeInfra ps"
+            Write-Warn "Verifica el estado en Docker Desktop bajo 'qualitydoc-databases'"
         }
     }
 }
@@ -141,13 +140,17 @@ if ($Mode -in @("Infra", "All")) {
 # ── 6. Resumen de servicios activos ───────────────────────────────────────────
 Write-Host ""
 Write-Host "  ┌────────────────────────────────────────────────────┐" -ForegroundColor Blue
-Write-Host "  │  Servicios activos (modo: $Mode)" -ForegroundColor Blue
+Write-Host "  │  Servicios activos (Organizados por Proyecto)      │" -ForegroundColor Blue
 Write-Host "  ├──────────────────────┬─────────────────────────────┤" -ForegroundColor Blue
 
 if ($Mode -in @("Infra", "All")) {
+    Write-Host "  │ [qualitydoc-databases]                             │" -ForegroundColor Cyan
     Write-Host "  │  SQL Server 2022      │  localhost:1433             │" -ForegroundColor Blue
     Write-Host "  │  PostgreSQL 16        │  localhost:5432             │" -ForegroundColor Blue
     Write-Host "  │  MongoDB 7            │  localhost:27017            │" -ForegroundColor Blue
+}
+if ($Mode -in @("Apps", "Portal", "All")) {
+    Write-Host "  │ [qualitydoc-apps]                                  │" -ForegroundColor Cyan
 }
 if ($Mode -in @("Apps", "All")) {
     Write-Host "  │  .NET App             │  localhost:5001             │" -ForegroundColor Blue
@@ -161,7 +164,7 @@ if ($Mode -in @("Portal", "All")) {
 Write-Host "  └──────────────────────┴─────────────────────────────┘" -ForegroundColor Blue
 Write-Host ""
 
-# ── 7. Abrir Visual Studio (solo en modo All, a menos que -OpenVS se indique) ─
+# ── 7. Abrir Visual Studio ────────────────────────────────────────────────────
 $ShouldOpenVS = ($Mode -eq "All") -and (-not $SkipVS)
 
 if ($ShouldOpenVS) {
@@ -197,9 +200,9 @@ if ($ShouldOpenVS) {
 # ── 8. Mensaje final ──────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "  ══════════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "   ¡Todo listo!" -ForegroundColor Green
+Write-Host "    ¡Todo listo y organizado en Docker Desktop!" -ForegroundColor Green
 Write-Host ""
-Write-Host "   Usuarios de prueba:" -ForegroundColor Green
+Write-Host "    Usuarios de prueba:" -ForegroundColor Green
 Write-Host "     admin    / Admin123!"    -ForegroundColor White
 Write-Host "     gerente  / Gerente123!"  -ForegroundColor White
 Write-Host "     revisor1 / Revisor123!"  -ForegroundColor White
@@ -208,18 +211,13 @@ Write-Host "  ══════════════════════
 Write-Host ""
 
 # ── Comandos de ayuda ─────────────────────────────────────────────────────────
-Write-Host "  Comandos útiles por composer:" -ForegroundColor DarkGray
-Write-Host "    docker compose -f docker-compose.infra.yml  ps      # Estado BD"        -ForegroundColor DarkGray
-Write-Host "    docker compose -f docker-compose.apps.yml   ps      # Estado backend"   -ForegroundColor DarkGray
-Write-Host "    docker compose -f docker-compose.portal.yml ps      # Estado portal"    -ForegroundColor DarkGray
+Write-Host "  Comandos útiles por archivo de configuración:" -ForegroundColor DarkGray
+Write-Host "    docker compose -f docker-compose.infra.yml  ps      # Estado bases de datos" -ForegroundColor DarkGray
+Write-Host "    docker compose -f docker-compose.apps.yml   ps      # Estado servicios backend" -ForegroundColor DarkGray
+Write-Host "    docker compose -f docker-compose.portal.yml ps      # Estado portal PHP" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "    docker compose -f docker-compose.infra.yml  logs -f # Logs BD"          -ForegroundColor DarkGray
-Write-Host "    docker compose -f docker-compose.apps.yml   logs -f # Logs backend"     -ForegroundColor DarkGray
-Write-Host "    docker compose -f docker-compose.portal.yml logs -f # Logs portal"      -ForegroundColor DarkGray
+Write-Host "    .\setup.ps1 -Mode Infra    # Levantar solo bases de datos" -ForegroundColor DarkGray
+Write-Host "    .\setup.ps1 -Mode Apps     # Levantar solo backend"        -ForegroundColor DarkGray
+Write-Host "    .\setup.ps1 -Mode Portal   # Levantar solo portal PHP"     -ForegroundColor DarkGray
+Write-Host "    .\setup.ps1 -ResetData     # Limpiar volúmenes y recrear todo" -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "    .\setup.ps1 -Mode Infra    # Solo bases de datos"    -ForegroundColor DarkGray
-Write-Host "    .\setup.ps1 -Mode Apps     # Solo backend"           -ForegroundColor DarkGray
-Write-Host "    .\setup.ps1 -Mode Portal   # Solo PHP portal"        -ForegroundColor DarkGray
-Write-Host "    .\setup.ps1 -ResetData     # Borrar datos y reiniciar" -ForegroundColor DarkGray
-Write-Host ""
-

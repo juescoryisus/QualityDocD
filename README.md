@@ -42,47 +42,38 @@ El proyecto implementa un enfoque **políglota**, asignando cada responsabilidad
    cd QualityDocD
    cp .env.example .env
 
-   📥 TRÁFICO DEL USUARIO / NAVEGADOR (Puerto 5001)
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                 APLICACIÓN .NET MVC (YARP)                  │
-│  - Interfaz de Usuario Principal                            │
-│  - Gestión del Ciclo de Vida del Documento                  │
-│  - Autenticación por Cookies (Sesión de 8h)                 │
-└───────────────┬──────────────┬──────────────┬───────────────┘
-                │              │              │
-       (YARP Proxy)   (YARP Proxy)            │ (Sincrónico)
-  /node-api/*   │      /search/*       │      │
-                ▼              ▼              ▼
- ┌──────────────────┐  ┌──────────────┐  ┌────────────────────┐
- │ API REST NODE.JS │  │ SERV. BUSC.  │  │   SQL SERVER 2022  │
- │ (Puerto 5000)    │  │ (Puerto 3001)│  │    (Puerto 1433)   │
- │                  │  │              │  │                    │
- │ - Express 5 / TS │  │ - Node /     │  │ - Fuente de verdad │
- │ - Multi-tenant   │  │   Mongoose   │  │   transaccional    │
- │ - Auth por JWT   │  │ - Indexación │  │ - Tablas: Docs,    │
- └────────┬─────────┘  └──────┬───────┘  │   Users, Approvals │
-          │                   │          └────────────────────┘
-          │ (Drizzle ORM)     │
-          ▼                   │ (Mongoose)
- ┌──────────────────┐         ▼
- │  POSTGRESQL 16   │  ┌──────────────┐
- │  (Puerto 5432)   │  │  MONGODB 7   │◀─── (Sync Asíncrono HTTP)
- │                  │  │(Puerto 27017)│     desde App .NET cuando
- │ - Tablas API     │  │              │     un doc es Aprobado
- │ - Almacén de     │  │- Metadata    │
- │   Auditoría      │  │- Índice de   │
- └────────▲─────────┘  │  Texto Corp. │
-          │            └──────▲───────┘
-          │                   │
-          └─────────┬─────────┘
-                    │ (PDO / HTTP)
-                    │
-       ┌────────────┴────────────┐
-       │       PORTAL PHP        │
-       │     (Puerto 8080)       │
-       │                         │
-       │ - Panel de Auditoría    │
-       │ - Consultas de Solo Reg.│
-       └─────────────────────────┘
+   graph TD
+    %% Estilos de los nodos
+    classDef net fill:#512bd4,stroke:#333,stroke-width:2px,color:#fff;
+    classDef node fill:#339933,stroke:#333,stroke-width:1px,color:#fff;
+    classDef db fill:#24292e,stroke:#fff,stroke-width:1px,color:#fff;
+    classDef php fill:#777bb4,stroke:#333,stroke-width:1px,color:#fff;
+
+    User[📥 Tráfico del Usuario / Navegador] -->|Puerto 5001| NET
+
+    subgraph apps [Servicios de Aplicación]
+        NET[.NET MVC + YARP Proxy]:::net
+        NODE[API REST Node.js<br>Puerto 5000]:::node
+        SEARCH[Servicio Búsqueda<br>Puerto 3001]:::node
+        PHP[Portal PHP<br>Puerto 8080]:::php
+    end
+
+    %% Enrutamiento YARP
+    NET -->|/node-api/* Proxy| NODE
+    NET -->|/search/* Proxy| SEARCH
+
+    subgraph dbs [Bases de Datos - Persistencia Políglota]
+        SQL[(SQL Server 2022<br>Puerto 1433)]:::db
+        PG[(PostgreSQL 16<br>Puerto 5432)]:::db
+        MONGO[(MongoDB 7<br>Puerto 27017)]:::db
+    end
+
+    %% Conexiones e Inserciones
+    NET -->|1. Escritura Síncrona| SQL
+    NET -.->|3. Sync Asíncrono HTTP| SEARCH
+    NODE -->|Drizzle ORM| PG
+    SEARCH -->|Mongoose| MONGO
+
+    %% Lecturas del Portal PHP
+    PHP -->|PDO| PG
+    PHP -->|HTTP Request| SEARCH

@@ -1,3 +1,4 @@
+name: qualitydoc-apps
 services:
 
   # ── Node.js Search Service ────────────────────────────────────────────────────

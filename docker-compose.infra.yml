@@ -1,3 +1,4 @@
+name: qualitydoc-databases
 services:
 
   # ── SQL Server 2022 ──────────────────────────────────────────────────────────

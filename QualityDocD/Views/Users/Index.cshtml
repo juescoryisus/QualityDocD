@@ -1,0 +1,112 @@
+﻿@model IEnumerable<QualityDocD.Models.Domain.User>
+@{
+    ViewData["Title"] = "Gestión de Usuarios";
+    var roles = new[] {
+        ("Viewer",   "Viewer (Consulta)"),
+        ("Reviewer", "Reviewer (Revisor)"),
+        ("Manager",  "Manager (Gerente)"),
+        ("Admin",    "Admin"),
+    };
+    if (User.IsInRole("SuperAdmin"))
+        roles = roles.Append(("SuperAdmin", "SuperAdmin")).ToArray();
+}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="fw-bold mb-0">
+        <i class="bi bi-people me-2 text-primary"></i>Gestión de Usuarios
+    </h4>
+    <a asp-controller="Auth" asp-action="Register" class="btn btn-primary">
+        <i class="bi bi-person-plus me-1"></i>Nuevo Usuario
+    </a>
+</div>
+
+@if (TempData["Success"] != null)
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle me-2"></i>@TempData["Success"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+@if (TempData["Error"] != null)
+{
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-circle me-2"></i>@TempData["Error"]
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th class="ps-3">Usuario</th>
+                    <th>Correo</th>
+                    <th>Área</th>
+                    <th style="width:220px">Rol</th>
+                    <th class="text-center">Estado</th>
+                    <th class="text-end pe-3">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var u in Model)
+                {
+                    <tr>
+                        <td class="ps-3 fw-semibold">
+                            <i class="bi bi-person-circle me-1 text-secondary"></i>@u.Username
+                        </td>
+                        <td class="text-muted small">@u.Email</td>
+                        <td class="text-muted small">@u.Department</td>
+                        <td>
+                            <form asp-action="ChangeRole" method="post"
+                                  class="d-flex gap-2 align-items-center">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="userId" value="@u.Id" />
+                                <select name="role" class="form-select form-select-sm">
+                                    @foreach (var (val, label) in roles)
+                                    {
+                                        <option value="@val" selected="@(u.Role == val)">@label</option>
+                                    }
+                                </select>
+                                <button type="submit" class="btn btn-sm btn-outline-primary"
+                                        title="Guardar rol">
+                                    <i class="bi bi-floppy"></i>
+                                </button>
+                            </form>
+                        </td>
+                        <td class="text-center">
+                            @if (u.IsActive)
+                            {
+                                <span class="badge bg-success">Activo</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Inactivo</span>
+                            }
+                        </td>
+                        <td class="text-end pe-3">
+                            <form asp-action="ToggleActive" method="post" class="d-inline">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="userId" value="@u.Id" />
+                                <button type="submit"
+                                        class="btn btn-sm @(u.IsActive ? "btn-outline-warning" : "btn-outline-success")"
+                                        title="@(u.IsActive ? "Desactivar" : "Activar") usuario">
+                                    <i class="bi @(u.IsActive ? "bi-person-slash" : "bi-person-check")"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                @if (!Model.Any())
+                {
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-5">
+                            <i class="bi bi-people fs-1 d-block mb-2"></i>
+                            No hay usuarios registrados aún.
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

@@ -10,6 +10,12 @@ public class DocumentIndexViewModel
     public string? FilterStatus { get; set; }
     public string? FilterCategory { get; set; }
     public string? SearchQuery { get; set; }
+
+    // Paginación
+    public int Page { get; set; } = 1;
+    public int PageSize { get; set; } = 15;
+    public int TotalCount { get; set; }
+    public int TotalPages => (int)Math.Ceiling((double)TotalCount / PageSize);
 }
 
 public class DocumentRowViewModel

@@ -64,4 +64,20 @@ public class CompaniesController : Controller
         TempData[ok ? "Success" : "Error"] = ok ? "Estado actualizado." : error;
         return RedirectToAction(nameof(Index));
     }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public async Task<IActionResult> ChangeUserRole(int userId, string role, int companyId)
+    {
+        var (ok, error) = await _svc.ChangeUserRoleAsync(
+            userId, role,
+            isSuperAdmin: true,
+            requestingUserId: 0,
+            requestingUserCompanyId: 0);
+
+        TempData[ok ? "Success" : "Error"] = ok
+            ? "Rol actualizado correctamente."
+            : error;
+        return RedirectToAction(nameof(Details), new { id = companyId });
+    }
+
 }

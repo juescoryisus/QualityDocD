@@ -89,8 +89,12 @@ public class DocumentService
     // ── Consultas ─────────────────────────────────────────────────────────────
 
     public async Task<DocumentIndexViewModel> GetIndexAsync(
-        string? status, string? category, string? search)
+    string? status, string? category, string? search,
+    int page = 1, int pageSize = 15)
     {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 5, 100);
+
         var query = ScopeDocuments().Include(d => d.CreatedByUser).AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(status) &&
@@ -105,7 +109,13 @@ public class DocumentService
                                   || d.Description.Contains(search)
                                   || d.Code.Contains(search));
 
-        var docs = await query.OrderByDescending(d => d.CreatedAt).ToListAsync();
+        var total = await query.CountAsync();
+
+        var docs = await query
+            .OrderByDescending(d => d.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
 
         var counts = await ScopeDocuments()
             .GroupBy(d => d.Status)
@@ -119,6 +129,9 @@ public class DocumentService
             FilterCategory = category,
             SearchQuery = search,
             StatusCounts = counts,
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = total,
         };
     }
 

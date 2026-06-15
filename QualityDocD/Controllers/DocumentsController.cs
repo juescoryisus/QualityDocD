@@ -27,9 +27,10 @@ public class DocumentsController : Controller
 
     // GET /Documents
     public async Task<IActionResult> Index(
-        string? status, string? category, string? search)
+    string? status, string? category, string? search,
+    int page = 1, int pageSize = 15)
     {
-        var vm = await _svc.GetIndexAsync(status, category, search);
+        var vm = await _svc.GetIndexAsync(status, category, search, page, pageSize);
         return View(vm);
     }
 

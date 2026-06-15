@@ -6,6 +6,42 @@ namespace QualityDocD.Services;
 
 public class CompanyService
 {
+    // Agregar al final de la clase CompanyService, antes del último }
+
+    public async Task<(bool ok, string? error)> ChangeUserRoleAsync(
+        int userId, string newRole, bool isSuperAdmin,
+        int requestingUserId, int requestingUserCompanyId)
+    {
+        var baseRoles = new[] { "Viewer", "Reviewer", "Manager", "Admin" };
+        var allRoles = new[] { "Viewer", "Reviewer", "Manager", "Admin", "SuperAdmin" };
+
+        var allowed = isSuperAdmin ? allRoles : baseRoles;
+        if (!allowed.Contains(newRole))
+            return (false, "Rol no válido.");
+
+        var user = await _sql.Users.FindAsync(userId);
+        if (user == null) return (false, "Usuario no encontrado.");
+
+        if (!isSuperAdmin)
+        {
+            if (user.CompanyId != requestingUserCompanyId)
+                return (false, "No tienes permiso para modificar este usuario.");
+            if (user.Role == "SuperAdmin")
+                return (false, "No puedes modificar el rol de un SuperAdmin.");
+            if (user.Role == "Admin" && userId != requestingUserId)
+                return (false, "No puedes modificar el rol de otro Admin.");
+        }
+
+        user.Role = newRole;
+        await _sql.SaveChangesAsync();
+        return (true, null);
+    }
+
+
+
+
+
+
     private readonly AppDbContext _sql;
 
     public CompanyService(AppDbContext sql) => _sql = sql;

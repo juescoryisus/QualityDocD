@@ -13,7 +13,7 @@ public class HomeController : Controller
 
     public async Task<IActionResult> Index()
     {
-        var vm = await _svc.GetIndexAsync(null, null, null);
+        var vm = await _svc.GetIndexAsync(null, null, null, page: 1, pageSize: 8);
         return View(vm);
     }
 }

@@ -71,6 +71,11 @@
                                     <i class="bi bi-person-plus me-1"></i>Registrar Usuario
                                 </a>
                             </li>
+                            <li class="nav-item">
+                                <a class="nav-link" asp-controller="Users" asp-action="Index">
+                                    <i class="bi bi-people me-1"></i>Usuarios
+                                </a>
+                            </li>
                         }
                         @if (User.IsInRole("SuperAdmin"))
                         {

@@ -16,6 +16,7 @@
 <div class="card border-0 shadow-sm mb-3">
     <div class="card-body py-3">
         <form method="get" class="row g-2 align-items-end">
+            <input type="hidden" name="page" value="1" />
             <div class="col-md-4">
                 <label class="form-label small fw-semibold mb-1">Buscar</label>
                 <input name="search" value="@Model.SearchQuery" class="form-control form-control-sm"
@@ -78,10 +79,11 @@
     }
     @foreach (var (key, label, color) in allStatuses)
     {
-        var count = key == "" ? Model.Documents.Count : Model.StatusCounts.GetValueOrDefault(key, 0);
+        var count = key == "" ? Model.TotalCount : Model.StatusCounts.GetValueOrDefault(key, 0);
         var active = (Model.FilterStatus ?? "") == key;
         if (count == 0 && key != "" && !active) { continue; }
         <a asp-action="Index" asp-route-status="@key" asp-route-category="@Model.FilterCategory"
+           asp-route-search="@Model.SearchQuery" asp-route-page="1"
            class="badge fs-6 text-decoration-none
             @(active ? $"bg-{color}" : "bg-light text-dark border")">
             @label (@count)
@@ -176,3 +178,52 @@
         </div>
     </div>
 </div>
+
+<!-- Paginación -->
+@if (Model.TotalPages > 1)
+{
+    <nav class="d-flex justify-content-between align-items-center mt-3">
+        <small class="text-muted">
+            Mostrando @((Model.Page - 1) * Model.PageSize + 1)–@(Math.Min(Model.Page * Model.PageSize, Model.TotalCount))
+            de @Model.TotalCount documentos
+        </small>
+        <ul class="pagination pagination-sm mb-0">
+            <li class="page-item @(Model.Page <= 1 ? "disabled" : "")">
+                <a class="page-link"
+                   asp-action="Index"
+                   asp-route-page="@(Model.Page - 1)"
+                   asp-route-pageSize="@Model.PageSize"
+                   asp-route-status="@Model.FilterStatus"
+                   asp-route-category="@Model.FilterCategory"
+                   asp-route-search="@Model.SearchQuery">
+                    <i class="bi bi-chevron-left"></i>
+                </a>
+            </li>
+
+            @for (int i = Math.Max(1, Model.Page - 2); i <= Math.Min(Model.TotalPages, Model.Page + 2); i++)
+            {
+                <li class="page-item @(i == Model.Page ? "active" : "")">
+                    <a class="page-link"
+                       asp-action="Index"
+                       asp-route-page="@i"
+                       asp-route-pageSize="@Model.PageSize"
+                       asp-route-status="@Model.FilterStatus"
+                       asp-route-category="@Model.FilterCategory"
+                       asp-route-search="@Model.SearchQuery">@i</a>
+                </li>
+            }
+
+            <li class="page-item @(Model.Page >= Model.TotalPages ? "disabled" : "")">
+                <a class="page-link"
+                   asp-action="Index"
+                   asp-route-page="@(Model.Page + 1)"
+                   asp-route-pageSize="@Model.PageSize"
+                   asp-route-status="@Model.FilterStatus"
+                   asp-route-category="@Model.FilterCategory"
+                   asp-route-search="@Model.SearchQuery">
+                    <i class="bi bi-chevron-right"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+}

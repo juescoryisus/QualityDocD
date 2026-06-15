@@ -42,7 +42,8 @@ El proyecto implementa un enfoque **políglota**, asignando cada responsabilidad
    cd QualityDocD
    cp .env.example .env
 
-   graph TD
+```mermaid
+graph TD
     %% Estilos de los nodos
     classDef net fill:#512bd4,stroke:#333,stroke-width:2px,color:#fff;
     classDef node fill:#339933,stroke:#333,stroke-width:1px,color:#fff;

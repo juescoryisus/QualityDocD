@@ -33,13 +33,17 @@ services:
     environment:
       ConnectionStrings__SqlServer:  "Server=sqlserver,1433;Database=QualityDocDB;User Id=sa;Password=${SQLSERVER_SA_PASSWORD:-QualityDoc2026!};TrustServerCertificate=True;"
       ConnectionStrings__PostgreSQL: "Host=postgres;Port=5432;Database=${PG_DB:-qualitydoc_audit};Username=${PG_USER:-qualitydoc};Password=${PG_PASSWORD:-QualityDoc_PG_2026!};"
-      MongoDB__Uri:                  "mongodb://${MONGO_USER:-mongoadmin}:${MONGO_PASSWORD:-QualityDoc_Mongo_2026!}@mongodb:27017"
+      MongoDB__Host:                 "mongodb"
+      MongoDB__Port:                 "27017"
+      MongoDB__Username:             "${MONGO_USER:-mongoadmin}"
+      MongoDB__Password:             "${MONGO_PASSWORD:-QualityDoc_Mongo_2026!}"
       MongoDB__Database:             "${MONGO_DB:-qualitydoc_meta}"
       SearchService__BaseUrl:        "http://search-service:3001"
       NodeApi__Url:                  "http://node-api:5000"
       ApiAuth__JwtSecret:            "${SESSION_SECRET:-QualityDoc-JWT-Secret-Change-Me!}"
       ApiAuth__ExpirationHours:      "8"
       ASPNETCORE_URLS:               "http://+:5000"
+      ASPNETCORE_ENVIRONMENT:        "Development"
     volumes:
       - uploads_data:/app/wwwroot/uploads
 

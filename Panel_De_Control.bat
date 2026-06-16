@@ -11,36 +11,38 @@ echo                 PANEL DE CONTROL — QUALITYDOC
 echo =====================================================================
 echo.
 echo   [ CONTENEDORES ]
-echo     1. Encender TODO (Bases de Datos + Apps + Portal)
+echo     1. Encender TODO (Todos los Stacks Tecnológicos)
 echo     2. Apagar TODO (Limpiar contenedores y liberar memoria)
 echo     3. Reiniciar TODO rápido
-echo     4. Encender SOLO Bases de Datos  [qualitydoc-databases]
-echo     5. Encender SOLO Aplicaciones    [qualitydoc-apps]
+echo     4. Encender Stack .NET Core + SQL Server
+echo     5. Encender Stack PHP + PostgreSQL (+ Node API)
+echo     6. Encender Stack Node.js + MongoDB (Search Service)
 echo.
 echo   [ ACCESOS DIRECTOS (Abrir Navegador) ]
-echo     6. Abrir Aplicación .NET    -- http://localhost:5001
-echo     7. Abrir Node API           -- http://localhost:5000
-echo     8. Abrir Search Service     -- http://localhost:3001
-echo     9. Abrir Portal PHP         -- http://localhost:8080
+echo     7. Abrir Aplicación .NET    -- http://localhost:5001
+echo     8. Abrir Node API           -- http://localhost:5000
+echo     9. Abrir Search Service     -- http://localhost:3001
+echo     10. Abrir Portal PHP         -- http://localhost:8080
 echo.
 echo   [ SISTEMA ]
-echo     10. Ver estado actual (Docker PS)
-echo     11. Salir del panel
+echo     11. Ver estado actual (Docker PS)
+echo     12. Salir del panel
 echo.
 echo =====================================================================
-set /p opc="Seleccione una opción (1-11) y presione ENTER: "
+set /p opc="Seleccione una opción (1-12) y presione ENTER: "
 
 if "%opc%"=="1" goto START_ALL
 if "%opc%"=="2" goto STOP_ALL
 if "%opc%"=="3" goto RESTART_ALL
-if "%opc%"=="4" goto START_INFRA
-if "%opc%"=="5" goto START_APPS
-if "%opc%"=="6" goto OPEN_NET
-if "%opc%"=="7" goto OPEN_NODE
-if "%opc%"=="8" goto OPEN_SEARCH
-if "%opc%"=="9" goto OPEN_PHP
-if "%opc%"=="10" goto STATUS
-if "%opc%"=="11" goto EXIT
+if "%opc%"=="4" goto START_NET
+if "%opc%"=="5" goto START_PHP
+if "%opc%"=="6" goto START_NODE
+if "%opc%"=="7" goto OPEN_NET
+if "%opc%"=="8" goto OPEN_NODE
+if "%opc%"=="9" goto OPEN_SEARCH
+if "%opc%"=="10" goto OPEN_PHP
+if "%opc%"=="11" goto STATUS
+if "%opc%"=="12" goto EXIT
 
 echo.
 echo [x] Opción inválida. Intente de nuevo...
@@ -49,11 +51,11 @@ goto MENU
 
 :START_ALL
 echo.
-echo [+] Levantando infraestructura completa y aplicaciones...
-:: Se ejecutan por separado para que Docker respete las carpetas (proyectos)
-docker compose -f docker-compose.infra.yml up -d
-docker compose -f docker-compose.apps.yml up -d
-docker compose -f docker-compose.portal.yml up -d
+echo [+] Levantando infraestructura completa organizada por Stacks...
+docker network create qualitydoc_net 2>nul
+docker compose -f docker-compose.net.yml up -d
+docker compose -f docker-compose.php.yml up -d
+docker compose -f docker-compose.node.yml up -d
 echo.
 echo [!] Sistema encendido.
 pause
@@ -62,10 +64,9 @@ goto MENU
 :STOP_ALL
 echo.
 echo [-] Apagando todos los contenedores...
-:: Apagamos en orden inverso para evitar conflictos de dependencias
-docker compose -f docker-compose.portal.yml down
-docker compose -f docker-compose.apps.yml down
-docker compose -f docker-compose.infra.yml down
+docker compose -f docker-compose.node.yml down
+docker compose -f docker-compose.php.yml down
+docker compose -f docker-compose.net.yml down
 echo.
 echo [!] Todos los servicios se han detenido correctamente.
 pause
@@ -74,26 +75,37 @@ goto MENU
 :RESTART_ALL
 echo.
 echo [*] Reiniciando servicios en segundo plano...
-docker compose -f docker-compose.infra.yml restart
-docker compose -f docker-compose.apps.yml restart
-docker compose -f docker-compose.portal.yml restart
+docker compose -f docker-compose.net.yml restart
+docker compose -f docker-compose.php.yml restart
+docker compose -f docker-compose.node.yml restart
 echo.
 echo [!] Reinicio completado.
 pause
 goto MENU
 
-:START_INFRA
+:START_NET
 echo.
-echo [+] Levantando carpeta visual [qualitydoc-databases]...
-docker compose -f docker-compose.infra.yml up -d
+echo [+] Levantando stack visual [qualitydoc-dotnet-sql]...
+docker network create qualitydoc_net 2>nul
+docker compose -f docker-compose.net.yml up -d
 echo.
 pause
 goto MENU
 
-:START_APPS
+:START_PHP
 echo.
-echo [+] Levantando carpeta visual [qualitydoc-apps]...
-docker compose -f docker-compose.apps.yml -f docker-compose.portal.yml up -d
+echo [+] Levantando stack visual [qualitydoc-php-postgres]...
+docker network create qualitydoc_net 2>nul
+docker compose -f docker-compose.php.yml up -d
+echo.
+pause
+goto MENU
+
+:START_NODE
+echo.
+echo [+] Levantando stack visual [qualitydoc-node-mongo]...
+docker network create qualitydoc_net 2>nul
+docker compose -f docker-compose.node.yml up -d
 echo.
 pause
 goto MENU

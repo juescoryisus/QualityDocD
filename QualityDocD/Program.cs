@@ -102,25 +102,26 @@ using (var scope = app.Services.CreateScope())
         // Las tablas ya existen sin historial de migraciones
     }
 
-    // ── Empresa por defecto ────────────────────────────────────────────────────
-    if (!await db.Companies.AnyAsync())
+    // ── Empresa por defecto (CORREGIDO: Busca por slug, no si la tabla está vacía) ──
+    var company = await db.Companies.FirstOrDefaultAsync(c => c.Slug == "demo");
+    if (company == null)
     {
-        db.Companies.Add(new Company
+        company = new Company
         {
             Name = "Empresa Demo",
             Slug = "demo",
             Email = "admin@demo.qualitydoc.local",
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
-        });
+        };
+        db.Companies.Add(company);
         await db.SaveChangesAsync();
     }
 
     // ── Usuarios de demostración ───────────────────────────────────────────────
     if (!await db.Users.AnyAsync())
     {
-        var company = await db.Companies.FirstAsync(c => c.Slug == "demo");
-
+        // Nota: 'company' ya está garantizado aquí, ya sea porque existía o porque se acaba de crear arriba.
         db.Users.AddRange(
             new User
             {

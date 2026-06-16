@@ -1,0 +1,74 @@
+name: qualitydoc-dotnet-sql
+services:
+
+  # ── SQL Server 2022 ──────────────────────────────────────────────────────────
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: qualitydoc_sqlserver
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    environment:
+      ACCEPT_EULA:       "Y"
+      SA_PASSWORD:       "${SQLSERVER_SA_PASSWORD:-QualityDoc2026!}"
+      MSSQL_PID:         "Express"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+      - ./db/sql:/docker-entrypoint-sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${SQLSERVER_SA_PASSWORD:-QualityDoc2026!}' -Q 'SELECT 1' -No -C"]
+      interval: 15s
+      timeout:  10s
+      retries:  8
+      start_period: 30s
+
+  # ── Aplicación .NET ───────────────────────────────────────────────────────────
+  qualitydoc-app:
+    build:
+      context: ./QualityDocD
+      dockerfile: Dockerfile
+    container_name: qualitydoc_app
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    ports:
+      - "5001:5000"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    environment:
+      ConnectionStrings__SqlServer:  "Server=qualitydoc_sqlserver,1433;Database=QualityDocDB;User Id=sa;Password=${SQLSERVER_SA_PASSWORD:-QualityDoc2026!};TrustServerCertificate=True;"
+      ConnectionStrings__PostgreSQL: "Host=qualitydoc_postgres;Port=5432;Database=${PG_DB:-qualitydoc_audit};Username=${PG_USER:-qualitydoc};Password=${PG_PASSWORD:-QualityDoc_PG_2026!};"
+      MongoDB__Host:                 "qualitydoc_mongodb"
+      MongoDB__Port:                 "27017"
+      MongoDB__Username:             "${MONGO_USER:-mongoadmin}"
+      MongoDB__Password:             "${MONGO_PASSWORD:-QualityDoc_Mongo_2026!}"
+      MongoDB__Database:             "${MONGO_DB:-qualitydoc_meta}"
+      SearchService__BaseUrl:        "http://qualitydoc_search:3001"
+      NodeApi__Url:                  "http://qualitydoc_node_api:5000"
+      ApiAuth__JwtSecret:            "${SESSION_SECRET:-QualityDoc-JWT-Secret-Change-Me!}"
+      ApiAuth__ExpirationHours:      "8"
+      ASPNETCORE_URLS:               "http://+:5000"
+      ASPNETCORE_ENVIRONMENT:        "Development"
+    volumes:
+      - uploads_data:/app/wwwroot/uploads
+
+# ── Volúmenes persistentes ────────────────────────────────────────────────────
+volumes:
+  sqlserver_data:
+    driver: local
+    labels:
+      project: "qualitydoc"
+      db:      "sqlserver"
+  uploads_data:
+    driver: local
+    labels:
+      project: "qualitydoc"
+
+# ── Red compartida externa ────────────────────────────────────────────────────
+networks:
+  qualitydoc_net:
+    name: qualitydoc_net
+    external: true

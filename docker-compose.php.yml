@@ -1,0 +1,70 @@
+name: qualitydoc-php-postgres
+services:
+
+  # ── PostgreSQL 16 ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: qualitydoc_postgres
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    environment:
+      POSTGRES_DB:       "${PG_DB:-qualitydoc_audit}"
+      POSTGRES_USER:     "${PG_USER:-qualitydoc}"
+      POSTGRES_PASSWORD: "${PG_PASSWORD:-QualityDoc_PG_2026!}"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/sql:/docker-entrypoint-sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-qualitydoc} -d ${PG_DB:-qualitydoc_audit}"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+      start_period: 10s
+
+  # ── Portal PHP ────────────────────────────────────────────────────────────────
+  php-portal:
+    build:
+      context: ./php-portal
+      dockerfile: Dockerfile
+    container_name: qualitydoc_php
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    ports:
+      - "8080:80"
+    environment:
+      PG_USER:     "${PG_USER:-qualitydoc}"
+      PG_PASSWORD: "${PG_PASSWORD:-QualityDoc_PG_2026!}"
+
+  # ── Node.js API ───────────────────────────────────────────────────────────────
+  node-api:
+    build:
+      context: ./node-api
+      dockerfile: Dockerfile
+    container_name: qualitydoc_node_api
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    ports:
+      - "5000:5000"
+    environment:
+      DATABASE_URL:   "${NODE_API_DATABASE_URL:-postgresql://qualitydoc:QualityDoc_PG_2026!@postgres:5432/qualitydoc_audit}"
+      SESSION_SECRET: "${SESSION_SECRET:-QualityDoc-JWT-Secret-Change-Me!}"
+      NODE_API_PORT:  "5000"
+
+# ── Volúmenes persistentes ────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+    labels:
+      project: "qualitydoc"
+      db:      "postgresql"
+
+# ── Red compartida externa ────────────────────────────────────────────────────
+networks:
+  qualitydoc_net:
+    name: qualitydoc_net
+    external: true

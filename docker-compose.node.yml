@@ -1,0 +1,57 @@
+name: qualitydoc-node-mongo
+services:
+
+  # ── MongoDB 7 ────────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:7
+    container_name: qualitydoc_mongodb
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER:-mongoadmin}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD:-QualityDoc_Mongo_2026!}"
+      MONGO_INITDB_DATABASE:      "${MONGO_DB:-qualitydoc_meta}"
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./db/mongodb/init.js:/docker-entrypoint-initdb.d/01_init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 15s
+      timeout:  10s
+      retries:  5
+      start_period: 20s
+
+  # ── Node.js Search Service ────────────────────────────────────────────────────
+  search-service:
+    build:
+      context: ./search-service
+      dockerfile: Dockerfile
+    container_name: qualitydoc_search
+    restart: unless-stopped
+    networks:
+      - qualitydoc_net
+    environment:
+      PORT:           "3001"
+      MONGO_HOST:     "mongodb"
+      MONGO_USER:     "${MONGO_USER:-mongoadmin}"
+      MONGO_PASSWORD: "${MONGO_PASSWORD:-QualityDoc_Mongo_2026!}"
+      MONGO_DB:       "${MONGO_DB:-qualitydoc_meta}"
+    ports:
+      - "3001:3001"
+
+# ── Volúmenes persistentes ────────────────────────────────────────────────────
+volumes:
+  mongodb_data:
+    driver: local
+    labels:
+      project: "qualitydoc"
+      db:      "mongodb"
+
+# ── Red compartida externa ────────────────────────────────────────────────────
+networks:
+  qualitydoc_net:
+    name: qualitydoc_net
+    external: true

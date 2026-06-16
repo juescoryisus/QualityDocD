@@ -41,6 +41,12 @@ public class UsersController : Controller
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> ChangeRole(int userId, string role)
     {
+        if (!IsSuperAdmin())
+        {
+            TempData["Error"] = "No tienes permiso para cambiar roles.";
+            return RedirectToAction(nameof(Index));
+        }
+
         var (ok, error) = await _svc.ChangeUserRoleAsync(
             userId, role,
             isSuperAdmin: IsSuperAdmin(),

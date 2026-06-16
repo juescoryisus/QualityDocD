@@ -58,21 +58,30 @@
                         <td class="text-muted small">@u.Email</td>
                         <td class="text-muted small">@u.Department</td>
                         <td>
-                            <form asp-action="ChangeRole" method="post"
-                                  class="d-flex gap-2 align-items-center">
-                                @Html.AntiForgeryToken()
-                                <input type="hidden" name="userId" value="@u.Id" />
-                                <select name="role" class="form-select form-select-sm">
-                                    @foreach (var (val, label) in roles)
-                                    {
-                                        <option value="@val" selected="@(u.Role == val)">@label</option>
-                                    }
-                                </select>
-                                <button type="submit" class="btn btn-sm btn-outline-primary"
-                                        title="Guardar rol">
-                                    <i class="bi bi-floppy"></i>
-                                </button>
-                            </form>
+                            @if (User.IsInRole("SuperAdmin"))
+                            {
+                                <form asp-action="ChangeRole" method="post"
+                                      class="d-flex gap-2 align-items-center">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="userId" value="@u.Id" />
+                                    <select name="role" class="form-select form-select-sm">
+                                        @foreach (var (val, label) in roles)
+                                        {
+                                            <option value="@val" selected="@(u.Role == val)">@label</option>
+                                        }
+                                    </select>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary"
+                                            title="Guardar rol">
+                                        <i class="bi bi-floppy"></i>
+                                    </button>
+                                </form>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">
+                                    @(roles.FirstOrDefault(r => r.Item1 == u.Role).Item2 ?? u.Role)
+                                </span>
+                            }
                         </td>
                         <td class="text-center">
                             @if (u.IsActive)

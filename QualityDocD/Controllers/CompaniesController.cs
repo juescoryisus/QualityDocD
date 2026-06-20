@@ -24,8 +24,10 @@ public class CompaniesController : Controller
         if (company == null) return NotFound();
         ViewBag.Stats = await _svc.GetStatsAsync(id);
         ViewBag.Users = await db.Users
-            .Where(u => u.CompanyId == id)
-            .OrderBy(u => u.Role).ThenBy(u => u.Username)
+            .Include(u => u.Role)
+            .Include(u => u.Department)
+            .Where(u => u.Department.CompanyId == id)
+            .OrderBy(u => u.Role.Name).ThenBy(u => u.Username)
             .ToListAsync();
         return View(company);
     }

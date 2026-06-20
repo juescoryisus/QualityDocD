@@ -3,25 +3,23 @@ using QualityDocD.Models.Domain;
 
 namespace QualityDocD.Data;
 
-/// <summary>
-/// Contexto principal.
-/// Maneja: Companies, Users, Documents, DocumentApprovals, AuditLogs.
-/// </summary>
 public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
-    public DbSet<Company> Companies => Set<Company>();
-    public DbSet<User> Users => Set<User>();
-    public DbSet<Document> Documents => Set<Document>();
-    public DbSet<DocumentApproval> DocumentApprovals => Set<DocumentApproval>();
-    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<User> Users { get; set; }
+    public DbSet<Company> Companies { get; set; }
+    public DbSet<Document> Documents { get; set; }
+    public DbSet<DocumentApproval> DocumentApprovals { get; set; }
+    public DbSet<AuditLog> AuditLogs { get; set; }
+    public DbSet<Role> Roles { get; set; }
+    public DbSet<Department> Departments { get; set; }
 
     protected override void OnModelCreating(ModelBuilder m)
     {
         base.OnModelCreating(m);
 
-        // ── Company ───────────────────────────────────────────────────────────
+        // ── Company ───────────────────────────────────────────────
         m.Entity<Company>(e =>
         {
             e.HasIndex(c => c.Slug).IsUnique();
@@ -29,21 +27,41 @@ public class AppDbContext : DbContext
             e.Property(c => c.IsActive).HasDefaultValue(true);
         });
 
-        // ── User ──────────────────────────────────────────────────────────────
+        // ── Role ──────────────────────────────────────────────────
+        m.Entity<Role>(e =>
+        {
+            e.HasIndex(r => r.Name).IsUnique();
+            e.Property(r => r.IsActive).HasDefaultValue(true);
+        });
+
+        // ── Department ────────────────────────────────────────────
+        m.Entity<Department>(e =>
+        {
+            e.Property(d => d.IsActive).HasDefaultValue(true);
+            e.HasOne(d => d.Company)
+             .WithMany()
+             .HasForeignKey(d => d.CompanyId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── User ──────────────────────────────────────────────────
         m.Entity<User>(e =>
         {
             e.HasIndex(u => u.Username).IsUnique();
             e.HasIndex(u => u.Email).IsUnique();
-            e.Property(u => u.Role).HasDefaultValue("Viewer");
             e.Property(u => u.IsActive).HasDefaultValue(true);
-            e.HasOne(u => u.Company)
-             .WithMany(c => c.Users)
-             .HasForeignKey(u => u.CompanyId)
+            e.HasOne(u => u.Role)
+             .WithMany(r => r.Users)
+             .HasForeignKey(u => u.RoleId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(u => u.Department)
+             .WithMany(d => d.Users)
+             .HasForeignKey(u => u.DepartmentId)
              .OnDelete(DeleteBehavior.Restrict);
             e.ToTable(t => t.UseSqlOutputClause(false));
         });
 
-        // ── Document ──────────────────────────────────────────────────────────
+        // ── Document ──────────────────────────────────────────────
         m.Entity<Document>(e =>
         {
             e.HasIndex(d => d.Code).IsUnique();
@@ -59,7 +77,7 @@ public class AppDbContext : DbContext
             e.ToTable(t => t.UseSqlOutputClause(false));
         });
 
-        // ── DocumentApproval ─────────────────────────────────────────────────
+        // ── DocumentApproval ──────────────────────────────────────
         m.Entity<DocumentApproval>(e =>
         {
             e.Property(a => a.Status).HasConversion<string>();
@@ -74,7 +92,7 @@ public class AppDbContext : DbContext
             e.ToTable(t => t.UseSqlOutputClause(false));
         });
 
-        // ── AuditLog ──────────────────────────────────────────────────────────
+        // ── AuditLog ──────────────────────────────────────────────
         m.Entity<AuditLog>(e =>
         {
             e.HasOne(l => l.Document)

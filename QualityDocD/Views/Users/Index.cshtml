@@ -56,7 +56,7 @@
                             <i class="bi bi-person-circle me-1 text-secondary"></i>@u.Username
                         </td>
                         <td class="text-muted small">@u.Email</td>
-                        <td class="text-muted small">@u.Department</td>
+                        <td class="text-muted small">@u.Department?.Name</td>
                         <td>
                             @if (User.IsInRole("SuperAdmin"))
                             {
@@ -67,7 +67,7 @@
                                     <select name="role" class="form-select form-select-sm">
                                         @foreach (var (val, label) in roles)
                                         {
-                                            <option value="@val" selected="@(u.Role == val)">@label</option>
+                                            <option value="@val" selected="@(u.Role.Name == val)">@label</option>
                                         }
                                     </select>
                                     <button type="submit" class="btn btn-sm btn-outline-primary"
@@ -79,7 +79,7 @@
                             else
                             {
                                 <span class="badge bg-secondary">
-                                    @(roles.FirstOrDefault(r => r.Item1 == u.Role).Item2 ?? u.Role)
+                                    @(roles.FirstOrDefault(r => r.Item1 == u.Role.Name).Item2 ?? u.Role.Name)
                                 </span>
                             }
                         </td>

@@ -8,7 +8,7 @@ using QualityDocD.Services;
 
 namespace QualityDocD.Controllers;
 
-[Authorize(Roles = "Admin,Manager,Reviewer,SuperAdmin")]
+[Authorize(Roles = "Admin,Manager,SuperAdmin")]
 public class ReportsController : Controller
 {
     private readonly DocumentService _svc;

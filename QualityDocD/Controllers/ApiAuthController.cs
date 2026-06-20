@@ -34,8 +34,8 @@ public class ApiAuthController : ControllerBase
             return Unauthorized(new { error = "Credenciales incorrectas o empresa inactiva." });
 
         var token = _tokens.GenerateToken(
-            user.Id, user.Username, user.Email, user.Role, user.Department,
-            user.CompanyId, user.Company.Slug, user.Company.Name);
+     user.Id, user.Username, user.Email, user.Role.Name, user.Department.Name,
+     user.Department.CompanyId, user.Department.Company.Slug, user.Department.Company.Name);
 
         return Ok(new
         {
@@ -46,13 +46,13 @@ public class ApiAuthController : ControllerBase
                 id = user.Id,
                 username = user.Username,
                 email = user.Email,
-                role = user.Role,
-                department = user.Department,
+                role = user.Role.Name,
+                department = user.Department.Name,
                 company = new
                 {
-                    id = user.Company.Id,
-                    slug = user.Company.Slug,
-                    name = user.Company.Name,
+                    id = user.Department.Company.Id,
+                    slug = user.Department.Company.Slug,
+                    name = user.Department.Company.Name,
                 },
             }
         });

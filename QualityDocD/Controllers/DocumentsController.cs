@@ -43,10 +43,12 @@ public class DocumentsController : Controller
     }
 
     // GET /Documents/Create
+    [Authorize(Roles = "Admin,Manager,SuperAdmin")]
     public IActionResult Create() => View(new DocumentFormViewModel());
 
     // POST /Documents/Create
     [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Roles = "Admin,Manager,SuperAdmin")]
     public async Task<IActionResult> Create(DocumentFormViewModel model)
     {
         if (!ModelState.IsValid) return View(model);
@@ -57,6 +59,8 @@ public class DocumentsController : Controller
         TempData["Success"] = "Documento creado exitosamente.";
         return RedirectToAction(nameof(Details), new { id = docId });
     }
+
+
 
     // GET /Documents/Edit/5
     public async Task<IActionResult> Edit(int id)

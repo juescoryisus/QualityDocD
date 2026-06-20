@@ -37,16 +37,16 @@ public class AuthController : Controller
         }
 
         var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new(ClaimTypes.Name,           user.Username),
-            new(ClaimTypes.Email,          user.Email),
-            new(ClaimTypes.Role,           user.Role),
-            new("department",              user.Department),
-            new("company_id",              user.CompanyId.ToString()),
-            new("company_slug",            user.Company.Slug),
-            new("company_name",            user.Company.Name),
-        };
+{
+    new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+    new(ClaimTypes.Name,           user.Username),
+    new(ClaimTypes.Email,          user.Email),
+    new(ClaimTypes.Role,           user.Role.Name),
+    new("department",              user.Department.Name),
+    new("company_id",              user.Department.CompanyId.ToString()),
+    new("company_slug",            user.Department.Company.Slug),
+    new("company_name",            user.Department.Company.Name),
+};
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         var principal = new ClaimsPrincipal(identity);

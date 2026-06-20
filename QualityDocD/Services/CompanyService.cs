@@ -6,7 +6,9 @@ namespace QualityDocD.Services;
 
 public class CompanyService
 {
-    // Agregar al final de la clase CompanyService, antes del último }
+    private readonly AppDbContext _sql;
+
+    public CompanyService(AppDbContext sql) => _sql = sql;
 
     public async Task<(bool ok, string? error)> ChangeUserRoleAsync(
         int userId, string newRole, bool isSuperAdmin,
@@ -19,32 +21,30 @@ public class CompanyService
         if (!allowed.Contains(newRole))
             return (false, "Rol no válido.");
 
-        var user = await _sql.Users.FindAsync(userId);
+        var user = await _sql.Users
+            .Include(u => u.Role)
+            .Include(u => u.Department)
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
         if (user == null) return (false, "Usuario no encontrado.");
 
         if (!isSuperAdmin)
         {
-            if (user.CompanyId != requestingUserCompanyId)
+            if (user.Department.CompanyId != requestingUserCompanyId)
                 return (false, "No tienes permiso para modificar este usuario.");
-            if (user.Role == "SuperAdmin")
+            if (user.Role.Name == "SuperAdmin")
                 return (false, "No puedes modificar el rol de un SuperAdmin.");
-            if (user.Role == "Admin" && userId != requestingUserId)
+            if (user.Role.Name == "Admin" && userId != requestingUserId)
                 return (false, "No puedes modificar el rol de otro Admin.");
         }
 
-        user.Role = newRole;
+        var role = await _sql.Roles.FirstOrDefaultAsync(r => r.Name == newRole);
+        if (role == null) return (false, "Rol no encontrado en la base de datos.");
+
+        user.RoleId = role.Id;
         await _sql.SaveChangesAsync();
         return (true, null);
     }
-
-
-
-
-
-
-    private readonly AppDbContext _sql;
-
-    public CompanyService(AppDbContext sql) => _sql = sql;
 
     public async Task<List<Company>> GetAllAsync() =>
         await _sql.Companies.OrderBy(c => c.Name).ToListAsync();
@@ -107,7 +107,7 @@ public class CompanyService
 
     public async Task<CompanyStats> GetStatsAsync(int companyId)
     {
-        var users = await _sql.Users.CountAsync(u => u.CompanyId == companyId);
+        var users = await _sql.Users.CountAsync(u => u.Department.CompanyId == companyId);
         var docs = await _sql.Documents.CountAsync(d => d.CompanyId == companyId);
         var approved = await _sql.Documents.CountAsync(
             d => d.CompanyId == companyId && d.Status == DocumentStatus.Approved);

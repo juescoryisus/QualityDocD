@@ -82,8 +82,7 @@ public class DocumentService
     {
         var q = _sql.Users.AsQueryable();
         if (!IsSuperAdmin())
-            q = q.Where(u => u.CompanyId == GetCompanyId());
-        return q;
+            q = q.Where(u => u.Department.CompanyId == GetCompanyId()); return q;
     }
 
     // ── Consultas ─────────────────────────────────────────────────────────────
@@ -146,14 +145,14 @@ public class DocumentService
         if (doc == null) return null;
 
         var reviewers = await ScopeUsers()
-            .Where(u => u.IsActive
-                     && (u.Role == "Reviewer" || u.Role == "Manager")
+            .Where(u => u.IsActive && (u.Role.Name == "Reviewer" || u.Role.Name == "Manager")
                      && u.Id != doc.CreatedByUserId)
             .Select(u => new UserSelectItem
             {
                 Id = u.Id,
                 Username = u.Username,
-                Department = u.Department
+                Department = u.Department.Name
+
             })
             .ToListAsync();
 

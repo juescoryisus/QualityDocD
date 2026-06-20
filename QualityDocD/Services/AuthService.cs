@@ -10,17 +10,18 @@ public class AuthService
 
     public AuthService(AppDbContext sql) => _sql = sql;
 
-    /// <summary>Valida credenciales y retorna el usuario con su empresa cargada.</summary>
     public async Task<User?> ValidateAsync(string username, string password)
     {
         var user = await _sql.Users
-            .Include(u => u.Company)
+            .Include(u => u.Role)
+            .Include(u => u.Department)
+                .ThenInclude(d => d.Company)
             .FirstOrDefaultAsync(u => u.Username == username && u.IsActive);
 
         if (user == null || !BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
             return null;
 
-        if (!user.Company.IsActive)
+        if (!user.Department.Company.IsActive)
             return null;
 
         user.LastLoginAt = DateTime.UtcNow;
@@ -28,10 +29,9 @@ public class AuthService
         return user;
     }
 
-    /// <summary>Registra un usuario en la empresa indicada por su slug.</summary>
     public async Task<(bool ok, string? error)> RegisterAsync(
         string username, string email, string password,
-        string role, string dept, string companySlug)
+        string roleName, string deptName, string companySlug)
     {
         var company = await _sql.Companies
             .FirstOrDefaultAsync(c => c.Slug == companySlug && c.IsActive);
@@ -45,24 +45,32 @@ public class AuthService
         if (await _sql.Users.AnyAsync(u => u.Email == email))
             return (false, "El correo electrónico ya está registrado.");
 
+        var role = await _sql.Roles.FirstOrDefaultAsync(r => r.Name == roleName)
+                   ?? await _sql.Roles.FirstAsync(r => r.Name == "Viewer");
+
+        var dept = await _sql.Departments
+            .FirstOrDefaultAsync(d => d.Name == deptName && d.CompanyId == company.Id);
+
+        if (dept == null)
+        {
+            dept = new Department { Name = deptName, CompanyId = company.Id };
+            _sql.Departments.Add(dept);
+            await _sql.SaveChangesAsync();
+        }
+
         _sql.Users.Add(new User
         {
             Username = username,
             Email = email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
-            Role = role,
-            Department = dept,
-            CompanyId = company.Id,
+            RoleId = role.Id,
+            DepartmentId = dept.Id,
         });
 
         await _sql.SaveChangesAsync();
         return (true, null);
     }
 
-    /// <summary>
-    /// Registra el primer usuario SuperAdmin al crear una empresa nueva.
-    /// Solo para uso interno (no expuesto en UI pública).
-    /// </summary>
     public async Task<(bool ok, string? error)> RegisterSuperAdminAsync(
         string username, string email, string password, int companyId)
     {
@@ -72,14 +80,25 @@ public class AuthService
         if (await _sql.Users.AnyAsync(u => u.Email == email))
             return (false, "El correo electrónico ya está registrado.");
 
+        var role = await _sql.Roles.FirstAsync(r => r.Name == "SuperAdmin");
+
+        var dept = await _sql.Departments
+            .FirstOrDefaultAsync(d => d.Name == "Administración" && d.CompanyId == companyId);
+
+        if (dept == null)
+        {
+            dept = new Department { Name = "Administración", CompanyId = companyId };
+            _sql.Departments.Add(dept);
+            await _sql.SaveChangesAsync();
+        }
+
         _sql.Users.Add(new User
         {
             Username = username,
             Email = email,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
-            Role = "SuperAdmin",
-            Department = "Administración",
-            CompanyId = companyId,
+            RoleId = role.Id,
+            DepartmentId = dept.Id,
         });
 
         await _sql.SaveChangesAsync();

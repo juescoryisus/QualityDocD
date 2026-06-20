@@ -1,9 +1,10 @@
+using DocumentFormat.OpenXml.InkML;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
+using MongoDB.Driver;
 using QualityDocD.Data;
 using QualityDocD.Models.Domain;
 using QualityDocD.Services;
-using MongoDB.Driver;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -95,7 +96,17 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        await db.Database.MigrateAsync();
+        // Solo aplica migraciones pendientes que aún no se han ejecutado
+        // Si la BD ya está al día, no hace nada
+        try
+        {
+            await db.Database.MigrateAsync();
+        }
+        catch (Exception ex)
+        {
+            var logger = app.Services.GetRequiredService<ILogger<Program>>();
+            logger.LogWarning("MigrateAsync falló (puede ser que la BD ya esté actualizada): {Message}", ex.Message);
+        }
     }
     catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 2714)
     {
@@ -118,20 +129,49 @@ using (var scope = app.Services.CreateScope())
         await db.SaveChangesAsync();
     }
 
-    // ── Usuarios de demostración ───────────────────────────────────────────────
+    // ── Seed de Roles ──────────────────────────────────────────────────────────
+    if (!await db.Roles.AnyAsync())
+    {
+        db.Roles.AddRange(
+            new Role { Name = "SuperAdmin", Description = "Acceso total al sistema" },
+            new Role { Name = "Manager", Description = "Gestión de documentos" },
+            new Role { Name = "Reviewer", Description = "Revisar y aprobar" },
+            new Role { Name = "Viewer", Description = "Solo lectura" }
+        );
+        await db.SaveChangesAsync();
+    }
+
+    // ── Seed de Departments ────────────────────────────────────────────────────
+    if (!await db.Departments.AnyAsync())
+    {
+        db.Departments.AddRange(
+            new Department { Name = "TI", CompanyId = company.Id },
+            new Department { Name = "Calidad", CompanyId = company.Id },
+            new Department { Name = "Operaciones", CompanyId = company.Id },
+            new Department { Name = "Recursos Humanos", CompanyId = company.Id }
+        );
+        await db.SaveChangesAsync();
+    }
+
+    // ── Seed de Usuarios ───────────────────────────────────────────────────────
     if (!await db.Users.AnyAsync())
     {
-        // Nota: 'company' ya está garantizado aquí, ya sea porque existía o porque se acaba de crear arriba.
+        var roleSuperAdmin = await db.Roles.FirstAsync(r => r.Name == "SuperAdmin");
+        var roleManager = await db.Roles.FirstAsync(r => r.Name == "Manager");
+        var roleReviewer = await db.Roles.FirstAsync(r => r.Name == "Reviewer");
+
+        var deptTI = await db.Departments.FirstAsync(d => d.Name == "TI");
+        var deptCalidad = await db.Departments.FirstAsync(d => d.Name == "Calidad");
+
         db.Users.AddRange(
             new User
             {
                 Username = "superadmin",
                 Email = "superadmin@qualitydoc.local",
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("SuperAdmin123!"),
-                Role = "SuperAdmin",
-                Department = "TI",
+                RoleId = roleSuperAdmin.Id,
+                DepartmentId = deptTI.Id,
                 IsActive = true,
-                CompanyId = company.Id,
                 CreatedAt = DateTime.UtcNow,
             },
             new User
@@ -139,10 +179,9 @@ using (var scope = app.Services.CreateScope())
                 Username = "admin",
                 Email = "admin@qualitydoc.local",
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin123!"),
-                Role = "Admin",
-                Department = "TI",
+                RoleId = roleSuperAdmin.Id,
+                DepartmentId = deptTI.Id,
                 IsActive = true,
-                CompanyId = company.Id,
                 CreatedAt = DateTime.UtcNow,
             },
             new User
@@ -150,10 +189,9 @@ using (var scope = app.Services.CreateScope())
                 Username = "gerente",
                 Email = "gerente@qualitydoc.local",
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("Gerente123!"),
-                Role = "Manager",
-                Department = "Calidad",
+                RoleId = roleManager.Id,
+                DepartmentId = deptCalidad.Id,
                 IsActive = true,
-                CompanyId = company.Id,
                 CreatedAt = DateTime.UtcNow,
             },
             new User
@@ -161,10 +199,9 @@ using (var scope = app.Services.CreateScope())
                 Username = "revisor1",
                 Email = "revisor1@qualitydoc.local",
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("Revisor123!"),
-                Role = "Reviewer",
-                Department = "Producción",
+                RoleId = roleReviewer.Id,
+                DepartmentId = deptCalidad.Id,
                 IsActive = true,
-                CompanyId = company.Id,
                 CreatedAt = DateTime.UtcNow,
             },
             new User
@@ -172,10 +209,9 @@ using (var scope = app.Services.CreateScope())
                 Username = "revisor2",
                 Email = "revisor2@qualitydoc.local",
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("Revisor123!"),
-                Role = "Reviewer",
-                Department = "Calidad",
+                RoleId = roleReviewer.Id,
+                DepartmentId = deptCalidad.Id,
                 IsActive = true,
-                CompanyId = company.Id,
                 CreatedAt = DateTime.UtcNow,
             },
             new User
@@ -183,10 +219,9 @@ using (var scope = app.Services.CreateScope())
                 Username = "editor",
                 Email = "editor@qualitydoc.local",
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword("Editor123!"),
-                Role = "Editor",
-                Department = "Operaciones",
+                RoleId = roleReviewer.Id,
+                DepartmentId = deptCalidad.Id,
                 IsActive = true,
-                CompanyId = company.Id,
                 CreatedAt = DateTime.UtcNow,
             }
         );

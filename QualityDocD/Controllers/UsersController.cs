@@ -27,17 +27,17 @@ public class UsersController : Controller
 
     private bool IsSuperAdmin() => User.IsInRole("SuperAdmin");
 
-    // GET /Users
     public async Task<IActionResult> Index()
     {
         var users = await _db.Users
-            .Where(u => u.CompanyId == GetCompanyId())
-            .OrderBy(u => u.Role).ThenBy(u => u.Username)
+            .Include(u => u.Role)
+            .Include(u => u.Department)
+            .Where(u => u.Department.CompanyId == GetCompanyId())
+            .OrderBy(u => u.Role.Name).ThenBy(u => u.Username)
             .ToListAsync();
         return View(users);
     }
 
-    // POST /Users/ChangeRole
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> ChangeRole(int userId, string role)
     {
@@ -53,23 +53,23 @@ public class UsersController : Controller
             requestingUserId: GetUserId(),
             requestingUserCompanyId: GetCompanyId());
 
-        TempData[ok ? "Success" : "Error"] = ok
-            ? "Rol actualizado correctamente."
-            : error;
+        TempData[ok ? "Success" : "Error"] = ok ? "Rol actualizado correctamente." : error;
         return RedirectToAction(nameof(Index));
     }
 
-    // POST /Users/ToggleActive
     [HttpPost, ValidateAntiForgeryToken]
     public async Task<IActionResult> ToggleActive(int userId)
     {
-        var user = await _db.Users.FindAsync(userId);
+        var user = await _db.Users
+            .Include(u => u.Role)
+            .Include(u => u.Department)
+            .FirstOrDefaultAsync(u => u.Id == userId);
         if (user == null) return NotFound();
 
-        if (!IsSuperAdmin() && user.CompanyId != GetCompanyId())
+        if (!IsSuperAdmin() && user.Department.CompanyId != GetCompanyId())
             return Forbid();
 
-        if (user.Role == "SuperAdmin" && !IsSuperAdmin())
+        if (user.Role.Name == "SuperAdmin" && !IsSuperAdmin())
             return Forbid();
 
         user.IsActive = !user.IsActive;

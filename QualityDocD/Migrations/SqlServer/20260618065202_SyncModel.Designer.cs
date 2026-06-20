@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using QualityDocD.Data;
 
@@ -11,9 +12,11 @@ using QualityDocD.Data;
 namespace QualityDocD.Migrations.SqlServer
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260618065202_SyncModel")]
+    partial class SyncModel
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -314,6 +317,9 @@ namespace QualityDocD.Migrations.SqlServer
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("CompanyId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -346,6 +352,8 @@ namespace QualityDocD.Migrations.SqlServer
                         .HasColumnType("nvarchar(100)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
 
                     b.HasIndex("DepartmentId");
 
@@ -431,6 +439,10 @@ namespace QualityDocD.Migrations.SqlServer
 
             modelBuilder.Entity("QualityDocD.Models.Domain.User", b =>
                 {
+                    b.HasOne("QualityDocD.Models.Domain.Company", null)
+                        .WithMany("Users")
+                        .HasForeignKey("CompanyId");
+
                     b.HasOne("QualityDocD.Models.Domain.Department", "Department")
                         .WithMany("Users")
                         .HasForeignKey("DepartmentId")
@@ -451,6 +463,8 @@ namespace QualityDocD.Migrations.SqlServer
             modelBuilder.Entity("QualityDocD.Models.Domain.Company", b =>
                 {
                     b.Navigation("Documents");
+
+                    b.Navigation("Users");
                 });
 
             modelBuilder.Entity("QualityDocD.Models.Domain.Department", b =>
